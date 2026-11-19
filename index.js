@@ -72,6 +72,9 @@ export function createDeleteHandler(ctx, config, { rm = realRm } = {}) {
     const snapshot = await ctx.sessionPersistence.stat(sessionId)
     const logPath = snapshot?.location?.path
     if (typeof logPath !== 'string' || logPath.trim() === '') {
+      // A row can survive in the client list after its files are gone (the Session
+      // may still be resident in this Host process). Tell clients to drop it too.
+      announceRemoved(ctx, sessionId)
       return sendJson(res, 404, { ok: false, code: 'SESSION_NOT_FOUND', message: '会话不存在，可能已被删除' })
     }
 
@@ -93,6 +96,7 @@ export function createDeleteHandler(ctx, config, { rm = realRm } = {}) {
       return sendJson(res, 500, { ok: false, code: 'DELETE_FAILED', message: reasonOf(error) })
     }
 
+    announceRemoved(ctx, sessionId)
     return sendJson(res, 200, { ok: true, code: 'OK' })
   }
 }
@@ -103,6 +107,23 @@ function isWithin(root, target) {
   const step = relative(fold(root), fold(target))
   if (step === '' || step === '..' || isAbsolute(step)) return false
   return !step.startsWith(`..${sep}`)
+}
+
+/**
+ * Relays the Session controller's own removal event to clients.
+ *
+ * `session.list` is the union of persisted rows and Sessions still resident in
+ * this Host process, so deleting files alone never removes a row the process
+ * still holds; the controller publishes `api-session/removed` for disposed
+ * Sessions and the client store drops the row on it. Emitting the same event is
+ * the only public way to make the sidebar converge without a restart.
+ */
+function announceRemoved(ctx, sessionId) {
+  try {
+    ctx.emit?.('api-session/removed', sessionId)
+  } catch {
+    /* the deletion itself stands; a stale row is cosmetic */
+  }
 }
 
 function reasonOf(error) {

@@ -873,5 +873,6 @@ ctx.slots.inject("shell.overlay", () => ctx.slots.register({
 - 客户端会话列表的唯一来源是 `ctx.sessions.list`（`ObservableSnapshot<SessionListState>`，`dsh-api-session-controller/src/client/contract/sessions.ts:51`）。
 - 重新取列表只有一条路：`ISessions.refresh()` → `SessionManager.refreshList()` → 向 Host 发一次 `session.list` RPC（`client/sessions/service.ts:372-373`、`client/sessions/manager.ts:394-395`，单飞）。
 - Host 的 `list` 读磁盘（持久化层），所以**文件删掉后只要 refresh 一次，行就会消失**；不 refresh 则快照一直是旧的，行会留在侧栏。
-- 因此任何绕过会话服务、直接操作磁盘的插件，删除/移动/新建会话之后都要自己 `refresh()`（本插件：删除成功后、以及收到 `SESSION_NOT_FOUND` 时各调一次，后者用于清掉上一次遗留的幽灵行）。
+- **只 `refresh()` 不够**：`session.list` 是「持久化磁盘行 + 本进程仍驻留的会话行」的并集（`dsh-session-query/src/corpus.ts:62-90` 叠加 `ctx.sessions.list()`）。删掉磁盘目录后，**仍驻留在进程里的会话照样出现在列表里**，refresh 也筛不掉；而第三方插件没有公开 API 把会话从 store 里踢出去（`enter()` 返回的 detach 只给创建者）。
+- **正确做法**：发官方已声明的 `api-session/removed` 事件（`ctx.emit('api-session/removed', sessionId)`）。宿主自己就靠 `session/disposed` → `api-session/removed` 这条链通知客户端（`dsh-api-session-controller/src/index.ts:227-229`），客户端 `handleSessionRemoved()` 会把这个 id 从列表状态里移除（`client/index.ts:117`、`client/sessions/manager.ts:682-699`）。删除失败时**不能**发（会话还在，骗客户端删行会丢数据）。
 - 对照：官方 `archiveSession` 走 registry 写入 + 事件，客户端本来就有反应式来源，所以它不需要手动 refresh。这是「直接改磁盘」这条绕路必须自己补的成本。

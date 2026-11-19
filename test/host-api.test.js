@@ -17,6 +17,7 @@ function makeContext({ rejection, activity = [], snapshot } = {}) {
     registryIds: { unarchiveSession: [], unpinSession: [] },
     statCalls: [],
     waterfallCalls: [],
+    events: [],
   }
   const ctx = {
     connection: { requestRejection: () => rejection },
@@ -51,6 +52,9 @@ function makeContext({ rejection, activity = [], snapshot } = {}) {
     effect(callback) {
       state.effects += 1
       return callback()
+    },
+    emit(event, sessionId) {
+      state.events.push({ event, sessionId })
     },
   }
   return { ctx, state }
@@ -368,4 +372,41 @@ test('resolveSessionsRoot：显式配置优先于 $DSH_HOME', (t) => {
   const configured = join(tmpdir(), 'sessions-root-from-config')
 
   assert.equal(resolveSessionsRoot({ sessionsRoot: configured }), resolve(configured))
+})
+
+test('删除成功后向客户端广播 api-session/removed：Host 列表仍含驻留会话，不广播侧栏就不会消失', async (t) => {
+  const tree = await makeSessionTree(t)
+  const { ctx, state } = makeContext({ snapshot: tree.snapshot })
+  const handler = createDeleteHandler(ctx, { sessionsRoot: tree.root })
+  const res = makeResponse()
+
+  await handler(makeRequest(), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(state.events, [{ event: 'api-session/removed', sessionId: SESSION_ID }])
+})
+
+test('会话不存在时也广播 api-session/removed：清掉此前遗留的幽灵行', async () => {
+  const { ctx, state } = makeContext({ snapshot: undefined })
+  const handler = createDeleteHandler(ctx, { sessionsRoot: join(tmpdir(), 'unused-root') })
+  const res = makeResponse()
+
+  await handler(makeRequest(), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(state.events, [{ event: 'api-session/removed', sessionId: SESSION_ID }])
+})
+
+test('删除失败（rm 抛错）不广播：会话还在，不能骗客户端把行删掉', async (t) => {
+  const tree = await makeSessionTree(t)
+  const { ctx, state } = makeContext({ snapshot: tree.snapshot })
+  const handler = createDeleteHandler(ctx, { sessionsRoot: tree.root }, {
+    rm: async () => { throw new Error('EPERM: operation not permitted') },
+  })
+  const res = makeResponse()
+
+  await handler(makeRequest(), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(state.events, [])
 })

@@ -188,19 +188,6 @@ window.__ModuleLoader__.load({
         // request is on the wire sends nothing.
         let inFlight = null
 
-        /**
-         * The Host deletes files directly, so nothing tells the Session controller
-         * to re-list: `ctx.sessions.list` keeps rendering the deleted row until a
-         * `session.list` RPC runs. Ask for that refresh once the list may have changed.
-         * A failed refresh is never worth surfacing — the deletion is already committed.
-         */
-        async function refreshSessionList() {
-          try {
-            await ctx.sessions?.refresh?.()
-          } catch {
-            /* a stale row is cosmetic debt; the delete itself stands */
-          }
-        }
 
         /** Re-renders on store changes; the snapshot itself is read at render. */
         function useDeleteRequest() {
@@ -238,18 +225,16 @@ window.__ModuleLoader__.load({
             if (deleting || inFlight !== null) return
             setDeleting(true)
             setFailure(null)
-            inFlight = postDelete(request.sessionId, translate).then(async (outcome) => {
+            inFlight = postDelete(request.sessionId, translate).then((outcome) => {
               inFlight = null
               setDeleting(false)
               if (outcome.ok) {
-                await refreshSessionList()
                 closeDeleteRequest()
                 ctx.contextMenus.notify(translate('deleted'), true)
                 return
               }
-              // `SESSION_NOT_FOUND` means this row is a ghost left by an earlier
-              // deletion that never got re-listed; refresh drops it from the sidebar.
-              if (outcome.code === 'SESSION_NOT_FOUND') await refreshSessionList()
+              // The Host relays `api-session/removed`, so a ghost row this late is
+              // already being dropped by the Session store; only report the reason.
               setFailure(outcome.message)
             })
           }
