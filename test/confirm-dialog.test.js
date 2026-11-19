@@ -412,6 +412,7 @@ test('两个 locale 字典覆盖全部 key，中英都非空且既有文案未�
     'confirm.action',
     'confirm.pending',
     'cancel',
+    'close',
     'deleted',
     'sessionActive',
     'sessionNotFound',
