@@ -37,6 +37,6 @@
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.2-rc.2"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --import ./test/stub-resolve.mjs --test test/"
   }
 }
