@@ -9,21 +9,18 @@ async function loadRowButton(fetchImpl) {
   return { component: app.slot(ROW_ACTION_SLOT).component, dictionary: app.dictionary, fetches: app.fetches }
 }
 
-function makeStandardProps({ sessions, activePanelId = null, includeStandardProps = true }) {
+function makeStandardProps({ sessions, includeStandardProps = true }) {
   if (!includeStandardProps) return {}
-  return {
-    useSessions: (selector) => selector(sessions),
-    usePanelInfo: (selector) => selector({ activePanelId }),
-  }
+  return { useSessions: (selector) => selector(sessions) }
 }
 
-function render(component, { sessionId, sessions, activePanelId, includeStandardProps = true, dictionary, t }) {
+function render(component, { sessionId, sessions, includeStandardProps = true, dictionary, t }) {
   const translate = t ?? ((key) => dictionary.zh[key] ?? key)
   return component({
     sessionId,
     displayTitle: '会话标题',
     t: translate,
-    ...makeStandardProps({ sessions, activePanelId, includeStandardProps }),
+    ...makeStandardProps({ sessions, includeStandardProps }),
   })
 }
 
@@ -32,17 +29,14 @@ function buttonOf(tree) {
   return tree.children[0]
 }
 
-test('新增置灰文案在 zh/en 字典里都非空', async () => {
+test('置灰文案在 zh/en 字典里都非空', async () => {
   const { dictionary } = await loadRowButton()
 
   for (const language of ['zh', 'en']) {
-    for (const key of ['label.deleteCurrentDisabled', 'sessionActive']) {
-      const value = dictionary[language][key]
-      assert.equal(typeof value, 'string', `${language} ${key} 应为字符串`)
-      assert.notEqual(value.trim(), '', `${language} ${key} 不得为空串`)
-    }
+    const value = dictionary[language].sessionActive
+    assert.equal(typeof value, 'string', `${language} sessionActive 应为字符串`)
+    assert.notEqual(value.trim(), '', `${language} sessionActive 不得为空串`)
   }
-  assert.equal(dictionary.zh['label.deleteCurrentDisabled'], '不能删除当前会话')
   assert.equal(dictionary.zh.sessionActive, '会话正在运行，请先停止')
 })
 
@@ -55,19 +49,19 @@ test('空白会话行不渲染按钮', async () => {
   assert.equal(tree, null)
 })
 
-test('当前会话（mainView > 0）置灰，提示「不能删除当前会话」', async () => {
+test('当前会话（mainView > 0，已停止活动）可点，提示「永久删除」', async () => {
   const { component, dictionary } = await loadRowButton()
   const sessions = sessionState({ current: { retainedBy: { mainView: 1 } } })
 
   const tree = render(component, { sessionId: 'current', sessions, dictionary })
   const button = buttonOf(tree)
 
-  assert.equal(button.props.disabled, true)
-  assert.equal(button.props['aria-label'], '不能删除当前会话')
-  assert.equal(tree.props.label, '不能删除当前会话')
-  assert.equal(button.props.onClick, undefined, '置灰时不应挂请求回调')
-  assert.equal(button.props.style.cursor, 'default')
-  assert.equal(button.props.style.opacity, 0.4)
+  assert.equal(button.props.disabled, false)
+  assert.equal(button.props['aria-label'], '永久删除')
+  assert.equal(tree.props.label, '永久删除')
+  assert.equal(typeof button.props.onClick, 'function')
+  assert.equal(button.props.style.cursor, 'pointer')
+  assert.equal(button.props.style.opacity, 1)
 })
 
 test('运行中会话置灰，提示「会话正在运行，请先停止」', async () => {
@@ -83,7 +77,7 @@ test('运行中会话置灰，提示「会话正在运行，请先停止」', as
   assert.equal(button.props.onClick, undefined)
 })
 
-test('同时命中当前会话与运行中时，文案取「不能删除当前会话」', async () => {
+test('当前会话且运行中时置灰，文案「会话正在运行，请先停止」', async () => {
   const { component, dictionary } = await loadRowButton()
   const sessions = sessionState({ currentBusy: { running: true, retainedBy: { mainView: 2 } } })
 
@@ -91,13 +85,13 @@ test('同时命中当前会话与运行中时，文案取「不能删除当前�
   const button = buttonOf(tree)
 
   assert.equal(button.props.disabled, true)
-  assert.equal(button.props['aria-label'], '不能删除当前会话')
-  assert.equal(tree.props.label, '不能删除当前会话')
+  assert.equal(button.props['aria-label'], '会话正在运行，请先停止')
+  assert.equal(tree.props.label, '会话正在运行，请先停止')
 })
 
 test('普通会话可点，提示「永久删除」', async () => {
   const { component, dictionary } = await loadRowButton()
-  const sessions = sessionState({ plain: {}, current: { retainedBy: { mainView: 1 } } })
+  const sessions = sessionState({ plain: {} })
 
   const tree = render(component, { sessionId: 'plain', sessions, dictionary })
   const button = buttonOf(tree)
@@ -110,40 +104,33 @@ test('普通会话可点，提示「永久删除」', async () => {
   assert.equal(button.props.style.opacity, 1)
 })
 
-test('面板激活态下不判定当前会话，mainView 行仍可点', async () => {
+test('byId 里只剩一个会话且它是当前会话：入口可点（最后一个会话也能删）', async () => {
   const { component, dictionary } = await loadRowButton()
-  const sessions = sessionState({ shown: { retainedBy: { mainView: 1 } } })
+  const sessions = sessionState({ lastOne: { retainedBy: { mainView: 1 } } })
 
-  const tree = render(component, { sessionId: 'shown', sessions, activePanelId: 'diff', dictionary })
-  const button = buttonOf(tree)
+  assert.deepEqual(sessions.ids, ['lastOne'], '前置：确实只剩一个会话')
+  const button = buttonOf(render(component, { sessionId: 'lastOne', sessions, dictionary }))
 
   assert.equal(button.props.disabled, false)
   assert.equal(button.props['aria-label'], '永久删除')
+  assert.equal(typeof button.props.onClick, 'function')
 })
 
-test('面板激活态下运行中行仍置灰', async () => {
+test('retainedBy 不参与判定：mainView 行与侧栏引用行都可点', async () => {
   const { component, dictionary } = await loadRowButton()
-  const sessions = sessionState({ busy: { running: true } })
+  const sessions = sessionState({
+    current: { retainedBy: { mainView: 1 } },
+    selected: { retainedBy: { mainView: 0, sidebarView: 1 } },
+  })
 
-  const tree = render(component, { sessionId: 'busy', sessions, activePanelId: 'diff', dictionary })
-  const button = buttonOf(tree)
-
-  assert.equal(button.props.disabled, true)
-  assert.equal(button.props['aria-label'], '会话正在运行，请先停止')
+  for (const sessionId of ['current', 'selected']) {
+    const button = buttonOf(render(component, { sessionId, sessions, dictionary }))
+    assert.equal(button.props.disabled, false, `${sessionId} 可点`)
+    assert.equal(button.props['aria-label'], '永久删除')
+  }
 })
 
-test('只有 mainView 引用判定当前会话：侧栏引用 / 选中态行仍可点', async () => {
-  const { component, dictionary } = await loadRowButton()
-  const sessions = sessionState({ selected: { retainedBy: { mainView: 0, sidebarView: 1 } } })
-
-  const tree = render(component, { sessionId: 'selected', sessions, dictionary })
-  const button = buttonOf(tree)
-
-  assert.equal(button.props.disabled, false)
-  assert.equal(button.props['aria-label'], '永久删除')
-})
-
-test('缺少 useSessions / usePanelInfo 标准 props 时不抛异常且不置灰', async () => {
+test('缺少 useSessions 标准 prop 时不抛异常且不置灰', async () => {
   const { component, dictionary } = await loadRowButton()
 
   let tree
@@ -163,9 +150,9 @@ test('缺少 useSessions / usePanelInfo 标准 props 时不抛异常且不置灰
 
 test('置灰按钮被点击时不发请求（回调未挂载）', async () => {
   const { component, dictionary, fetches } = await loadRowButton()
-  const sessions = sessionState({ current: { retainedBy: { mainView: 1 } } })
+  const sessions = sessionState({ busy: { running: true } })
 
-  const button = buttonOf(render(component, { sessionId: 'current', sessions, dictionary }))
+  const button = buttonOf(render(component, { sessionId: 'busy', sessions, dictionary }))
 
   assert.equal(button.props.disabled, true)
   assert.equal(button.props.onClick, undefined)

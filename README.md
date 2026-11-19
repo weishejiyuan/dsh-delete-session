@@ -20,7 +20,7 @@ E:\ai编程需要的软件安装包\dsh-delete-session
 
 ## 当前状态
 
-功能已实现（ticket 01–06），代码侧由 64 条自动化测试覆盖：`npm test`。
+功能已实现（ticket 01–06），代码侧由 63 条自动化测试覆盖：`npm test`。
 
 实机人工验收**尚未执行**，逐条清单在 [`docs/manual-acceptance.md`](./docs/manual-acceptance.md)；与已装插件的冲突复核结果在 [`docs/conflict-audit-result.md`](./docs/conflict-audit-result.md)；实现期逐条核实的 DSH 源码契约（槽位/菜单/locale/路由/会话存储/安装机制，带文件行号与对账结论）在 [`docs/dsh-source-facts.md`](./docs/dsh-source-facts.md)。
 

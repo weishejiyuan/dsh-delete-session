@@ -23,7 +23,6 @@ window.__ModuleLoader__.load({
     const messages = {
       zh: {
         'label.deletePermanently': '永久删除',
-        'label.deleteCurrentDisabled': '不能删除当前会话',
         'confirm.title': '永久删除会话',
         'confirm.desc': '将永久删除「{title}」，此操作不可撤销。',
         'confirm.action': '永久删除',
@@ -37,7 +36,6 @@ window.__ModuleLoader__.load({
       },
       en: {
         'label.deletePermanently': 'Delete permanently',
-        'label.deleteCurrentDisabled': 'Cannot delete current session',
         'confirm.title': 'Delete session permanently',
         'confirm.desc': '「{title}」 will be deleted permanently. This cannot be undone.',
         'confirm.action': 'Delete permanently',
@@ -156,28 +154,29 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Single source of the visibility matrix (ADR-0000): a blank row hides, a
-     * current or running Session disables, everything else is an ordinary row.
-     * The row button and the Session menu both read it, so the two entries
-     * cannot drift apart.
+     * Single source of the visibility matrix: a blank row hides, a running
+     * Session disables, everything else is an ordinary row. The row button and
+     * the Session menu both read it, so the two entries cannot drift apart.
+     *
+     * `retainedBy.mainView` deliberately takes no part: the official
+     * `archiveSession` only refuses active Sessions, and disabling the Session
+     * open in the main view would make the last remaining Session undeletable.
      */
-    function visibilityOf({ row, panelActive }) {
+    function visibilityOf(row) {
       if (row === undefined || row.blank === true) {
         return { show: false, disabled: false, labelKey: 'label.deletePermanently' }
       }
-      const isCurrent = !panelActive && (row.retainedBy?.mainView ?? 0) > 0
       const running = row.running === true
-      const labelKey = isCurrent
-        ? 'label.deleteCurrentDisabled'
-        : running
-          ? 'sessionActive'
-          : 'label.deletePermanently'
-      return { show: true, disabled: isCurrent || running, labelKey }
+      return {
+        show: true,
+        disabled: running,
+        labelKey: running ? 'sessionActive' : 'label.deletePermanently',
+      }
     }
 
     return {
       name: 'delete-session-client',
-      inject: ['slots', 'locale', 'contextMenus', 'sessions', 'layout'],
+      inject: ['slots', 'locale', 'contextMenus', 'sessions'],
       apply(ctx) {
         // `effect` ties the dictionaries to the plugin's lifetime: unloading the
         // plugin revokes them instead of leaving the namespace behind.
@@ -286,15 +285,14 @@ window.__ModuleLoader__.load({
           )
         }
 
-        // `useSessions` / `usePanelInfo` are global standard props synthesized by
-        // the slot machinery; both calls stay unconditional so the hook order is
-        // fixed. A host that omits them leaves the row without data — the matrix
-        // has no rule for that, so the row stays an ordinary, enabled row instead
-        // of crashing the sidebar or silently losing its entry.
-        function DeleteSessionRowButton({ sessionId, displayTitle, t: translate, useSessions, usePanelInfo }) {
+        // `useSessions` is a global standard prop synthesized by the slot
+        // machinery; the call stays unconditional so the hook order is fixed. A
+        // host that omits it leaves the row without data — the matrix has no
+        // rule for that, so the row stays an ordinary, enabled row instead of
+        // crashing the sidebar or silently losing its entry.
+        function DeleteSessionRowButton({ sessionId, displayTitle, t: translate, useSessions }) {
           const row = useSessions?.((sessions) => sessions.byId[sessionId]) ?? {}
-          const panelActive = usePanelInfo?.((info) => info.activePanelId !== null) === true
-          const { show, disabled, labelKey } = visibilityOf({ row, panelActive })
+          const { show, disabled, labelKey } = visibilityOf(row)
 
           if (!show) return null
 
@@ -336,8 +334,7 @@ window.__ModuleLoader__.load({
          */
         function resolveSessionDelete(target) {
           const row = ctx.sessions.list.getSnapshot().byId[target.sessionId]
-          const panelActive = ctx.layout.panelInfo.getSnapshot().activePanelId !== null
-          const { show, disabled, labelKey } = visibilityOf({ row, panelActive })
+          const { show, disabled, labelKey } = visibilityOf(row)
           if (!show) return []
           return [{
             id: 'delete',
@@ -377,7 +374,7 @@ window.__ModuleLoader__.load({
           id: SESSION_MENU_ID,
           target: 'session',
           order: 700,
-          observe: () => [ctx.sessions.list, ctx.layout.panelInfo, ctx.locale],
+          observe: () => [ctx.sessions.list, ctx.locale],
           resolve: resolveSessionDelete,
         }), 'delete-session: session menu')
       },

@@ -29,15 +29,14 @@ test('菜单项经 ctx.effect 包裹注册为 {id: session.delete, target: sessi
   assert.equal(app.menuContributions[0].order, 700)
 })
 
-test('observe 返回 sessions.list / layout.panelInfo / locale 三个反应式源', async () => {
+test('observe 返回 sessions.list / locale 两个反应式源', async () => {
   const app = await loadPlugin()
 
   const sources = app.menuContributions[0].observe({ sessionId: 's-1', displayTitle: '会话标题' })
 
-  assert.equal(sources.length, 3)
+  assert.equal(sources.length, 2)
   assert.equal(sources[0], app.ctx.sessions.list)
-  assert.equal(sources[1], app.ctx.layout.panelInfo)
-  assert.equal(sources[2], app.ctx.locale)
+  assert.equal(sources[1], app.ctx.locale)
 })
 
 test('图标 key 注册在 contextMenu.icon keyed slot，组件来自 primitives', async () => {
@@ -66,15 +65,16 @@ test('普通会话：一项、带图标/danger/分隔线、无 afterContent 与 
   assert.equal(typeof action.run, 'function')
 })
 
-test('当前会话：一项、置灰、文案「不能删除当前会话」', async () => {
+test('当前会话（已停止活动）：一项、可点、文案「永久删除」', async () => {
   const app = await loadPlugin()
   app.setSessions({ 's-1': { retainedBy: { mainView: 1 } } })
 
   const actions = resolve(app)
 
-  assert.equal(actions.length, 1, '置灰不少一项，只是不可点')
-  assert.equal(actions[0].disabled, true)
-  assert.equal(actions[0].label, '不能删除当前会话')
+  assert.equal(actions.length, 1)
+  assert.notEqual(actions[0].disabled, true)
+  assert.equal(actions[0].label, '永久删除')
+  assert.equal(typeof actions[0].run, 'function')
 })
 
 test('运行中会话：一项、置灰、文案「会话正在运行，请先停止」', async () => {
@@ -88,7 +88,7 @@ test('运行中会话：一项、置灰、文案「会话正在运行，请先�
   assert.equal(actions[0].label, '会话正在运行，请先停止')
 })
 
-test('同时命中当前会话与运行中：文案取「不能删除当前会话」', async () => {
+test('当前会话且运行中：一项、置灰、文案「会话正在运行，请先停止」', async () => {
   const app = await loadPlugin()
   app.setSessions({ 's-1': { running: true, retainedBy: { mainView: 2 } } })
 
@@ -96,13 +96,12 @@ test('同时命中当前会话与运行中：文案取「不能删除当前会�
 
   assert.equal(actions.length, 1)
   assert.equal(actions[0].disabled, true)
-  assert.equal(actions[0].label, '不能删除当前会话')
+  assert.equal(actions[0].label, '会话正在运行，请先停止')
 })
 
-test('面板激活态下 mainView 行不置灰（当前会话判定让位于运行中判定）', async () => {
+test('byId 里只剩一个会话且它是当前会话：返回可点项（最后一个会话也能删）', async () => {
   const app = await loadPlugin()
   app.setSessions({ 's-1': { retainedBy: { mainView: 1 } } })
-  app.setActivePanel('diff')
 
   const actions = resolve(app)
 
@@ -144,7 +143,7 @@ test('英文界面下三项文案都是英文', async () => {
   assert.equal(resolve(app, { sessionId: 'plain', displayTitle: 't' })[0].label, 'Delete permanently')
   assert.equal(
     resolve(app, { sessionId: 'current', displayTitle: 't' })[0].label,
-    'Cannot delete current session',
+    'Delete permanently',
   )
   assert.equal(
     resolve(app, { sessionId: 'busy', displayTitle: 't' })[0].label,

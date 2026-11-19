@@ -24,7 +24,7 @@ test('factory 收到同步 require 并返回 name/inject/apply 三件套', async
   const { plugin } = await loadPlugin()
 
   assert.equal(plugin.name, 'delete-session-client')
-  assert.deepEqual([...plugin.inject], ['slots', 'locale', 'contextMenus', 'sessions', 'layout'])
+  assert.deepEqual([...plugin.inject], ['slots', 'locale', 'contextMenus', 'sessions'])
   assert.equal(typeof plugin.apply, 'function')
 })
 

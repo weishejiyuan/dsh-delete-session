@@ -20,7 +20,6 @@ function renderRow(app, { sessionId = 's-1', displayTitle = '会话标题', sess
     displayTitle,
     t: app.t,
     useSessions: (selector) => selector(sessions),
-    usePanelInfo: (selector) => selector({ activePanelId: null }),
   })
 }
 
@@ -324,7 +323,6 @@ test('两个 locale 字典覆盖全部 key，中英都非空且既有文案未�
   const loaded = await loadPlugin()
   const keys = [
     'label.deletePermanently',
-    'label.deleteCurrentDisabled',
     'confirm.title',
     'confirm.desc',
     'confirm.action',
@@ -347,7 +345,6 @@ test('两个 locale 字典覆盖全部 key，中英都非空且既有文案未�
   }
 
   assert.equal(loaded.dictionary.zh['label.deletePermanently'], '永久删除')
-  assert.equal(loaded.dictionary.zh['label.deleteCurrentDisabled'], '不能删除当前会话')
   assert.equal(loaded.dictionary.zh.sessionActive, '会话正在运行，请先停止')
   assert.equal(loaded.dictionary.zh.deleted, '会话已永久删除')
   assert.equal(loaded.dictionary.zh['confirm.title'], '永久删除会话')
