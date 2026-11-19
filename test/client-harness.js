@@ -151,7 +151,6 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
   const effects = []
   const notifications = []
   let sessionsSnapshot = sessionState({})
-  let panelSnapshot = { activePanelId: null }
 
   const ctx = {
     locale: {
@@ -187,12 +186,6 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
     sessions: {
       list: {
         getSnapshot: () => sessionsSnapshot,
-        subscribe: () => () => {},
-      },
-    },
-    layout: {
-      panelInfo: {
-        getSnapshot: () => panelSnapshot,
         subscribe: () => () => {},
       },
     },
@@ -234,9 +227,6 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
     },
     setSessions(rows) {
       sessionsSnapshot = sessionState(rows)
-    },
-    setActivePanel(panelId) {
-      panelSnapshot = { activePanelId: panelId }
     },
   }
 }
