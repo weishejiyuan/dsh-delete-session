@@ -5,14 +5,25 @@ import vm from 'node:vm'
 
 const PACKAGE_ID = '@local/dsh-delete-session'
 const ROW_ACTION_SLOT = 'sidebar.workspaces.session.row.action'
+const OVERLAY_SLOT = 'shell.overlay'
 
 function makeRequire() {
   const fakeReact = {
+    Fragment: function Fragment() {},
     createElement(type, props, ...children) {
       return { type, props: props ?? {}, children }
     },
+    useState(initial) {
+      return [typeof initial === 'function' ? initial() : initial, () => {}]
+    },
+    useEffect() {},
+    useMemo(factory) {
+      return factory()
+    },
   }
   const fakePrimitives = {
+    Button() {},
+    Modal() {},
     Tooltip() {},
     IconTrashOutlineRegular() {},
   }
@@ -100,7 +111,7 @@ test('factory 收到同步 require 并返回 name/inject/apply 三件套', async
   assert.equal(typeof plugin.apply, 'function')
 })
 
-test('apply 注册 deleteSession 中英字典与行内按钮 slot（order 300、无 priority）', async () => {
+test('apply 注册 deleteSession 中英字典、行内按钮 slot（order 300）与 shell.overlay 确认框', async () => {
   const { plugin, client } = await loadPlugin()
   plugin.apply(client.ctx)
 
@@ -115,14 +126,19 @@ test('apply 注册 deleteSession 中英字典与行内按钮 slot（order 300、
     assert.notEqual(locale.dicts[language].deleted.trim(), '', `${language} 成功提示不得为空`)
   }
 
-  assert.deepEqual(client.injections, [ROW_ACTION_SLOT])
-  assert.equal(client.slotRegistrations.length, 1)
-  const { options } = client.slotRegistrations[0]
-  assert.equal(options.name, ROW_ACTION_SLOT)
+  assert.deepEqual(client.injections, [ROW_ACTION_SLOT, OVERLAY_SLOT])
+  assert.equal(client.slotRegistrations.length, 2)
+
+  const options = client.slotRegistrations.find((entry) => entry.options.name === ROW_ACTION_SLOT).options
   assert.equal(options.id, 'delete-session')
   assert.equal(options.order, 300)
   assert.equal(options.locale, 'deleteSession')
   assert.equal('priority' in options, false, 'list slot 不应传 priority')
+
+  const overlay = client.slotRegistrations.find((entry) => entry.options.name === OVERLAY_SLOT).options
+  assert.equal(overlay.id, 'delete-session.confirm')
+  assert.equal(overlay.locale, 'deleteSession')
+  assert.equal('priority' in overlay, false, 'overlay 条目不应传 priority')
 })
 
 test('行内按钮是纯图标 + 500ms Tooltip + aria-label', async () => {
@@ -149,20 +165,20 @@ test('行内按钮是纯图标 + 500ms Tooltip + aria-label', async () => {
   assert.equal(icon.props.size, 14)
 })
 
-test('点击按钮向 Host 发出 POST，收到 OK 后弹出成功提示', async () => {
+test('点击按钮只打开确认请求，不发请求、不弹提示', async () => {
   const { plugin, client, posts } = await loadPlugin()
   plugin.apply(client.ctx)
 
-  const { component } = client.slotRegistrations[0]
-  const button = component({ sessionId: 's-1', displayTitle: '会话标题', t: (key) => `t:${key}` }).children[0]
+  const row = client.slotRegistrations.find((entry) => entry.options.name === ROW_ACTION_SLOT)
+  const button = row.component({ sessionId: 's-1', displayTitle: '会话标题', t: (key) => `t:${key}` }).children[0]
   button.props.onClick()
   await new Promise((resolve) => setImmediate(resolve))
 
-  assert.equal(posts.length, 1)
-  assert.equal(posts[0].url, '/delete-session/api/delete')
-  assert.equal(posts[0].options.method, 'POST')
-  assert.equal(posts[0].options.headers['content-type'], 'application/json')
-  assert.deepEqual(JSON.parse(posts[0].options.body), { sessionId: 's-1' })
+  assert.equal(posts.length, 0, '删除必须等确认框里点「永久删除」')
+  assert.deepEqual(client.notifications, [])
 
-  assert.deepEqual(client.notifications, [{ text: '会话已永久删除', success: true }])
+  const overlay = client.slotRegistrations.find((entry) => entry.options.name === OVERLAY_SLOT)
+  const dialog = overlay.component({ t: (key) => `t:${key}` })
+  assert.equal(dialog.props.request.sessionId, 's-1')
+  assert.equal(dialog.props.request.displayTitle, '会话标题')
 })
