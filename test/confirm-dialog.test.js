@@ -127,9 +127,15 @@ async function loadClient({ fetchImpl = async () => jsonResponse({ ok: true, cod
       },
     },
     contextMenus: {
+      register() {
+        return () => {}
+      },
       notify(text, success) {
         notifications.push({ text, success })
       },
+    },
+    effect(factory) {
+      return factory()
     },
   }
 
