@@ -1,0 +1,17 @@
+# 依赖（本项目不引入打包器，正常不会有；万一 Pi 加了测试依赖）
+node_modules/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 本地实验产物（不属于插件交付）
+*.tmp
+scratch/
