@@ -1,0 +1,6 @@
+# 只插入一行 Host 半。Client 半由 dsh-client-modules 扫描 package.json 的 dsh.client
+# 自动发现；为它在这里另插一行会让同一个包出现两个 Loader 源，整包 client 半加载失败
+# （client-modules: package <name> resolves from multiple active Loader sources）。
+- insert:
+    - id: delete-session-host
+      name: '@local/dsh-delete-session'
