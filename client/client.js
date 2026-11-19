@@ -155,11 +155,33 @@ window.__ModuleLoader__.load({
       return { ok: false, message: failureLine(result, translate) }
     }
 
+    /**
+     * Single source of the visibility matrix (ADR-0000): a blank row hides, a
+     * current or running Session disables, everything else is an ordinary row.
+     * The row button and the Session menu both read it, so the two entries
+     * cannot drift apart.
+     */
+    function visibilityOf({ row, panelActive }) {
+      if (row === undefined || row.blank === true) {
+        return { show: false, disabled: false, labelKey: 'label.deletePermanently' }
+      }
+      const isCurrent = !panelActive && (row.retainedBy?.mainView ?? 0) > 0
+      const running = row.running === true
+      const labelKey = isCurrent
+        ? 'label.deleteCurrentDisabled'
+        : running
+          ? 'sessionActive'
+          : 'label.deletePermanently'
+      return { show: true, disabled: isCurrent || running, labelKey }
+    }
+
     return {
       name: 'delete-session-client',
       inject: ['slots', 'locale', 'contextMenus', 'sessions', 'layout'],
       apply(ctx) {
-        ctx.locale.register(LOCALE_NAMESPACE, messages)
+        // `effect` ties the dictionaries to the plugin's lifetime: unloading the
+        // plugin revokes them instead of leaving the namespace behind.
+        ctx.effect(() => ctx.locale.register(LOCALE_NAMESPACE, messages), 'delete-session: locale')
         const translate = ctx.locale.bind(LOCALE_NAMESPACE)
 
         // One POST per in-flight window: a second confirm click while the first
@@ -214,13 +236,20 @@ window.__ModuleLoader__.load({
             })
           }
 
-          const failureLineNode = failure === null
-            ? null
-            : React.createElement(
-                'div',
-                { role: 'alert', style: { color: DANGER_TEXT_COLOR } },
-                failure,
-              )
+          // The dialog's body line: progress while the request is in flight,
+          // the failure reason after it. Confirming clears the previous failure,
+          // so the two never coexist. Progress gets its own `role="status"` line
+          // (like the official archive dialog) instead of hijacking the button
+          // label — the button keeps naming the action it performs.
+          const bodyLine = deleting
+            ? React.createElement('div', { role: 'status' }, translate('confirm.pending'))
+            : failure === null
+              ? null
+              : React.createElement(
+                  'div',
+                  { role: 'alert', style: { color: DANGER_TEXT_COLOR } },
+                  failure,
+                )
 
           return React.createElement(
             Modal,
@@ -242,38 +271,34 @@ window.__ModuleLoader__.load({
                   Button,
                   {
                     variant: 'outline',
-                    style: { color: DANGER_TEXT_COLOR },
+                    // The official dialog styles `.deleteAction:not(:disabled)`,
+                    // so the danger colour must not survive into the disabled
+                    // state.
+                    style: deleting ? undefined : { color: DANGER_TEXT_COLOR },
                     disabled: deleting,
                     onClick: confirm,
                   },
-                  translate(deleting ? 'confirm.pending' : 'confirm.action'),
+                  translate('confirm.action'),
                 ),
               ),
             },
-            failureLineNode,
+            bodyLine,
           )
         }
 
         // `useSessions` / `usePanelInfo` are global standard props synthesized by
-        // the slot machinery; the optional calls keep a host that omits them from
-        // crashing the row — without them the row reads as an ordinary, enabled row.
+        // the slot machinery; both calls stay unconditional so the hook order is
+        // fixed. A host that omits them leaves the row without data — the matrix
+        // has no rule for that, so the row stays an ordinary, enabled row instead
+        // of crashing the sidebar or silently losing its entry.
         function DeleteSessionRowButton({ sessionId, displayTitle, t: translate, useSessions, usePanelInfo }) {
+          const row = useSessions?.((sessions) => sessions.byId[sessionId]) ?? {}
           const panelActive = usePanelInfo?.((info) => info.activePanelId !== null) === true
-          const blank = useSessions?.((sessions) => sessions.byId[sessionId]?.blank === true) === true
-          const currentSessionId = useSessions?.((sessions) =>
-            panelActive
-              ? undefined
-              : Object.values(sessions.byId).find((row) => (row.retainedBy?.mainView ?? 0) > 0)?.id,
-          )
-          const running = useSessions?.((sessions) => sessions.byId[sessionId]?.running === true) === true
+          const { show, disabled, labelKey } = visibilityOf({ row, panelActive })
 
-          if (blank) return null
+          if (!show) return null
 
-          const isCurrent = currentSessionId !== undefined && currentSessionId === sessionId
-          const disabled = isCurrent || running
-          const label = translate(
-            isCurrent ? 'label.deleteCurrentDisabled' : running ? 'sessionActive' : 'label.deletePermanently',
-          )
+          const label = translate(labelKey)
           return React.createElement(
             Tooltip,
             { label, side: 'bottom', align: 'end', delayMs: 500, portal: true },
@@ -306,25 +331,21 @@ window.__ModuleLoader__.load({
 
         /**
          * The second entry point: the Session menu resolves the same visibility
-         * rule as the row button from the same sources. A blank row has no
-         * directory to delete, so it returns no action at all instead of a
-         * disabled one. When both reasons hold, "current Session" wins the label.
+         * matrix as the row button. A hidden row has no directory to delete, so
+         * it returns no action at all instead of a disabled one.
          */
         function resolveSessionDelete(target) {
           const row = ctx.sessions.list.getSnapshot().byId[target.sessionId]
-          if (row === undefined || row.blank === true) return []
           const panelActive = ctx.layout.panelInfo.getSnapshot().activePanelId !== null
-          const isCurrent = !panelActive && (row.retainedBy?.mainView ?? 0) > 0
-          const running = row.running === true
+          const { show, disabled, labelKey } = visibilityOf({ row, panelActive })
+          if (!show) return []
           return [{
             id: 'delete',
-            label: translate(
-              isCurrent ? 'label.deleteCurrentDisabled' : running ? 'sessionActive' : 'label.deletePermanently',
-            ),
+            label: translate(labelKey),
             icon: { key: SESSION_MENU_ICON_KEY },
             danger: true,
             separatorBefore: true,
-            ...(isCurrent || running ? { disabled: true } : {}),
+            ...(disabled ? { disabled: true } : {}),
             run: () => {
               openDeleteRequest({ sessionId: target.sessionId, displayTitle: target.displayTitle })
             },
