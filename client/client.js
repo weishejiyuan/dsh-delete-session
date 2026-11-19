@@ -110,26 +110,49 @@ window.__ModuleLoader__.load({
         case 'SESSION_NOT_FOUND':
           return translate('sessionNotFound')
         case 'DELETE_FAILED':
-          return withReason(translate('deleteFailed'), result.message)
+        // The four pre-flight guards (METHOD_NOT_ALLOWED / REJECTED /
+        // NOT_FOUND / INVALID_SESSION_ID) answer the same way on purpose: the
+        // failure label plus whatever reason the Host attached, and the label
+        // alone when it attached none.
         default:
           return withReason(translate('deleteFailed'), result?.message)
       }
     }
 
+    /**
+     * Reads the body only when it is a JSON object. A proxy, gateway or crash
+     * page can answer with HTML instead of the endpoint's contract; parser
+     * internals mean nothing to the user, so the caller reports the HTTP status
+     * instead and this returns `undefined`.
+     */
+    async function readJsonObject(response) {
+      try {
+        const body = await response.json()
+        return body !== null && typeof body === 'object' ? body : undefined
+      } catch {
+        return undefined
+      }
+    }
+
     /** Resolves to `{ ok: true }` or `{ ok: false, message }` — never rejects. */
     async function postDelete(sessionId, translate) {
+      let response
       try {
-        const response = await fetch(DELETE_ENDPOINT, {
+        response = await fetch(DELETE_ENDPOINT, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sessionId }),
         })
-        const result = await response.json()
-        if (result?.ok === true && result.code === 'OK') return { ok: true }
-        return { ok: false, message: failureLine(result, translate) }
       } catch (reason) {
         return { ok: false, message: withReason(translate('deleteFailed'), messageOf(reason)) }
       }
+
+      const result = await readJsonObject(response)
+      if (result === undefined) {
+        return { ok: false, message: withReason(translate('deleteFailed'), `HTTP ${response.status}`) }
+      }
+      if (result.ok === true && result.code === 'OK') return { ok: true }
+      return { ok: false, message: failureLine(result, translate) }
     }
 
     return {
