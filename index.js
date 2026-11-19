@@ -22,7 +22,7 @@ export const inject = ['webServer', 'connection', 'workspaceRegistry', 'sessionP
 export const Config = z.object({ sessionsRoot: z.string() })
 
 const ROUTE_PREFIX = '/delete-session/api'
-const DELETE_PATH = '/delete-session/api/delete'
+const DELETE_PATH = `${ROUTE_PREFIX}/delete`
 const MAX_BODY_BYTES = 64 * 1024
 
 export function apply(ctx, config) {

@@ -1,82 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import vm from 'node:vm'
 
-const ROW_ACTION_SLOT = 'sidebar.workspaces.session.row.action'
+import { ROW_ACTION_SLOT, loadPlugin, sessionState } from './client-harness.js'
 
-function makeRequire() {
-  const fakeReact = {
-    createElement(type, props, ...children) {
-      return { type, props: props ?? {}, children }
-    },
-  }
-  const fakePrimitives = {
-    Tooltip() {},
-    IconTrashOutlineRegular() {},
-  }
-  return (specifier) => {
-    if (specifier === 'react') return fakeReact
-    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return fakePrimitives
-    throw new Error(`unexpected require("${specifier}")`)
-  }
-}
-
-async function loadRowButton(fetchImpl = async () => ({ json: async () => ({ ok: true, code: 'OK' }) })) {
-  const source = await readFile(new URL('../client/client.js', import.meta.url), 'utf8')
-  let registration
-  let rowComponent
-  let dictionary
-  const sandbox = {
-    window: {
-      __ModuleLoader__: {
-        load(candidate) {
-          registration = candidate
-        },
-      },
-    },
-    console,
-    fetch: fetchImpl,
-  }
-  vm.runInNewContext(source, sandbox, { filename: 'client/client.js' })
-
-  const ctx = {
-    locale: {
-      register(ns, dicts) {
-        dictionary = dicts
-        return () => {}
-      },
-      bind() {
-        return (key) => dictionary.zh[key] ?? key
-      },
-    },
-    slots: {
-      inject(_key, callback) {
-        return callback()
-      },
-      register(options, component) {
-        if (options.name === ROW_ACTION_SLOT) rowComponent = component
-        return () => {}
-      },
-    },
-    contextMenus: {
-      register() {
-        return () => {}
-      },
-      notify() {},
-    },
-    effect(factory) {
-      return factory()
-    },
-  }
-  registration.factory(makeRequire()).apply(ctx)
-  return { component: rowComponent, dictionary }
-}
-
-function sessionState(rows) {
-  const byId = {}
-  for (const [id, row] of Object.entries(rows)) byId[id] = { id, running: false, blank: false, ...row }
-  return { ids: Object.keys(byId), byId }
+/** The row button plus the dictionaries it translates against. */
+async function loadRowButton(fetchImpl) {
+  const app = await loadPlugin(fetchImpl === undefined ? {} : { fetchImpl })
+  return { component: app.slot(ROW_ACTION_SLOT).component, dictionary: app.dictionary, fetches: app.fetches }
 }
 
 function makeStandardProps({ sessions, activePanelId = null, includeStandardProps = true }) {
@@ -232,15 +162,12 @@ test('缺少 useSessions / usePanelInfo 标准 props 时不抛异常且不置灰
 })
 
 test('置灰按钮被点击时不发请求（回调未挂载）', async () => {
-  const posts = []
-  const { component, dictionary } = await loadRowButton(async (url, options) => {
-    posts.push({ url, options })
-    return { json: async () => ({ ok: true, code: 'OK' }) }
-  })
+  const { component, dictionary, fetches } = await loadRowButton()
   const sessions = sessionState({ current: { retainedBy: { mainView: 1 } } })
 
   const button = buttonOf(render(component, { sessionId: 'current', sessions, dictionary }))
+
   assert.equal(button.props.disabled, true)
   assert.equal(button.props.onClick, undefined)
-  assert.equal(posts.length, 0)
+  assert.equal(fetches.length, 0)
 })
