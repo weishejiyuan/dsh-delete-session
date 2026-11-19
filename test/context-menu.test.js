@@ -1,0 +1,292 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+import vm from 'node:vm'
+
+const CONTEXT_MENU_ICON_SLOT = 'contextMenu.icon'
+const SESSION_MENU_ID = 'session.delete'
+const SESSION_MENU_ICON_KEY = 'session.delete'
+const OVERLAY_SLOT = 'shell.overlay'
+
+/**
+ * Minimal React stand-in. The menu entry itself never renders, but the overlay
+ * entry is how a test observes the shared store, so hooks must survive one
+ * render pass. `useEffect` is a no-op: the store is read at render time.
+ */
+function makeReact() {
+  return {
+    Fragment: function Fragment() {},
+    createElement(type, props, ...children) {
+      return { type, props: props ?? {}, children }
+    },
+    useState(initial) {
+      return [typeof initial === 'function' ? initial() : initial, () => {}]
+    },
+    useEffect() {},
+  }
+}
+
+function makeTranslator(dictionary, language) {
+  return (key) => dictionary[language]?.[key] ?? key
+}
+
+function sessionState(rows) {
+  const byId = {}
+  for (const [id, row] of Object.entries(rows)) byId[id] = { id, running: false, blank: false, ...row }
+  return { ids: Object.keys(byId), byId }
+}
+
+async function loadClient({ language = 'zh', fetchImpl = async () => ({ json: async () => ({ ok: true, code: 'OK' }) }) } = {}) {
+  const source = await readFile(new URL('../client/client.js', import.meta.url), 'utf8')
+  const React = makeReact()
+  const primitives = {
+    Button: function Button() {},
+    Modal: function Modal() {},
+    Tooltip: function Tooltip() {},
+    IconTrashOutlineRegular: function IconTrashOutlineRegular() {},
+  }
+  const fetches = []
+  let registration
+  const sandbox = {
+    window: { __ModuleLoader__: { load(candidate) { registration = candidate } } },
+    console,
+    fetch: async (url, options) => {
+      fetches.push({ url, options })
+      return fetchImpl(url, options)
+    },
+  }
+  vm.runInNewContext(source, sandbox, { filename: 'client/client.js' })
+
+  const dictionary = {}
+  const effects = []
+  const menus = []
+  const slots = []
+  let sessionsSnapshot = sessionState({})
+  let panelSnapshot = { activePanelId: null }
+
+  const ctx = {
+    locale: {
+      register(ns, dicts) {
+        assert.equal(ns, 'deleteSession')
+        Object.assign(dictionary, dicts)
+        return () => {}
+      },
+      bind() {
+        return makeTranslator(dictionary, language)
+      },
+    },
+    slots: {
+      inject(_key, callback) {
+        return callback()
+      },
+      register(options, component) {
+        slots.push({ options, component })
+        return () => {}
+      },
+    },
+    contextMenus: {
+      register(contribution) {
+        menus.push(contribution)
+        return () => {}
+      },
+      notify() {},
+    },
+    sessions: {
+      list: {
+        getSnapshot: () => sessionsSnapshot,
+        subscribe: () => () => {},
+      },
+    },
+    layout: {
+      panelInfo: {
+        getSnapshot: () => panelSnapshot,
+        subscribe: () => () => {},
+      },
+    },
+    effect(factory, label) {
+      effects.push(label)
+      return factory()
+    },
+  }
+
+  const plugin = registration.factory((specifier) => {
+    if (specifier === 'react') return React
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return primitives
+    throw new Error(`unexpected require("${specifier}")`)
+  })
+  plugin.apply(ctx)
+
+  return {
+    ctx,
+    primitives,
+    dictionary,
+    effects,
+    menus,
+    slots,
+    fetches,
+    plugin,
+    setSessions(rows) {
+      sessionsSnapshot = sessionState(rows)
+    },
+    setActivePanel(panelId) {
+      panelSnapshot = { activePanelId: panelId }
+    },
+    contribution: menus[0],
+    /** `displayTitle` rides on the captured menu target, like the row props. */
+    resolve(target = { sessionId: 's-1', displayTitle: '会话标题' }) {
+      return menus[0].resolve(target, new AbortController().signal)
+    },
+    /** The store is observable only through the overlay entry: render it. */
+    readStore() {
+      const overlay = slots.find((entry) => entry.options.name === OVERLAY_SLOT)
+      const dialog = overlay.component({ t: makeTranslator(dictionary, language) })
+      return dialog === null ? null : dialog.props.request
+    },
+  }
+}
+
+test('菜单项经 ctx.effect 包裹注册为 {id: session.delete, target: session, order: 700}', async () => {
+  const app = await loadClient()
+
+  assert.deepEqual(app.effects, ['delete-session: session menu'])
+  assert.equal(app.menus.length, 1, '只注册一个 contribution，不碰别人的菜单项')
+  assert.equal(app.contribution.id, SESSION_MENU_ID)
+  assert.equal(app.contribution.target, 'session')
+  assert.equal(app.contribution.order, 700)
+})
+
+test('observe 返回 sessions.list / layout.panelInfo / locale 三个反应式源', async () => {
+  const app = await loadClient()
+
+  const sources = app.contribution.observe({ sessionId: 's-1', displayTitle: '会话标题' })
+
+  assert.equal(sources.length, 3)
+  assert.equal(sources[0], app.ctx.sessions.list)
+  assert.equal(sources[1], app.ctx.layout.panelInfo)
+  assert.equal(sources[2], app.ctx.locale)
+})
+
+test('图标 key 注册在 contextMenu.icon keyed slot，组件来自 primitives', async () => {
+  const app = await loadClient()
+
+  const icon = app.slots.find((entry) => entry.options.name === CONTEXT_MENU_ICON_SLOT)
+  assert.notEqual(icon, undefined, '应注册 contextMenu.icon')
+  assert.equal(icon.options.key, SESSION_MENU_ICON_KEY)
+  assert.equal(icon.component, app.primitives.IconTrashOutlineRegular, '图标必须来自官方图标库，不自绘')
+})
+
+test('普通会话：一项、带图标/danger/分隔线、无 afterContent 与 commandId、可点', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': {} })
+
+  const actions = app.resolve()
+
+  assert.equal(actions.length, 1)
+  const [action] = actions
+  assert.equal(action.icon.key, SESSION_MENU_ICON_KEY)
+  assert.equal(action.danger, true)
+  assert.equal(action.separatorBefore, true)
+  assert.equal('afterContent' in action, false, '不排在官方归档项之后之外的位置')
+  assert.equal('commandId' in action, false, '菜单项不绑定快捷键命令')
+  assert.notEqual(action.disabled, true)
+  assert.equal(action.label, '永久删除')
+  assert.equal(typeof action.run, 'function')
+})
+
+test('当前会话：一项、置灰、文案「不能删除当前会话」', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': { retainedBy: { mainView: 1 } } })
+
+  const actions = app.resolve()
+
+  assert.equal(actions.length, 1, '置灰不少一项，只是不可点')
+  assert.equal(actions[0].disabled, true)
+  assert.equal(actions[0].label, '不能删除当前会话')
+})
+
+test('运行中会话：一项、置灰、文案「会话正在运行，请先停止」', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': { running: true } })
+
+  const actions = app.resolve()
+
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].disabled, true)
+  assert.equal(actions[0].label, '会话正在运行，请先停止')
+})
+
+test('同时命中当前会话与运行中：文案取「不能删除当前会话」', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': { running: true, retainedBy: { mainView: 2 } } })
+
+  const actions = app.resolve()
+
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].disabled, true)
+  assert.equal(actions[0].label, '不能删除当前会话')
+})
+
+test('面板激活态下 mainView 行不置灰（当前会话判定让位于运行中判定）', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': { retainedBy: { mainView: 1 } } })
+  app.setActivePanel('diff')
+
+  const actions = app.resolve()
+
+  assert.equal(actions.length, 1)
+  assert.notEqual(actions[0].disabled, true)
+  assert.equal(actions[0].label, '永久删除')
+})
+
+test('空白会话行：不出现该项（返回空数组，不是置灰）', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': { blank: true } })
+
+  assert.equal(app.resolve().length, 0, '空白行不出现该项，不是置灰')
+})
+
+test('byId 里查不到会话：不出现该项', async () => {
+  const app = await loadClient()
+  app.setSessions({ other: {} })
+
+  assert.equal(app.resolve({ sessionId: 'missing', displayTitle: '会话标题' }).length, 0)
+})
+
+test('点该项只把删除请求放进共享 store，不发任何请求', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': {} })
+
+  app.resolve({ sessionId: 's-1', displayTitle: '会话标题' })[0].run()
+
+  const store = app.readStore()
+  assert.equal(store.sessionId, 's-1')
+  assert.equal(store.displayTitle, '会话标题')
+  assert.equal(app.fetches.length, 0, '删除必须等确认框里点「永久删除」')
+})
+
+test('英文界面下三项文案都是英文', async () => {
+  const app = await loadClient({ language: 'en' })
+
+  app.setSessions({ plain: {}, current: { retainedBy: { mainView: 1 } }, busy: { running: true } })
+  assert.equal(app.resolve({ sessionId: 'plain', displayTitle: 't' })[0].label, 'Delete permanently')
+  assert.equal(
+    app.resolve({ sessionId: 'current', displayTitle: 't' })[0].label,
+    'Cannot delete current session',
+  )
+  assert.equal(
+    app.resolve({ sessionId: 'busy', displayTitle: 't' })[0].label,
+    'Session is running; stop it first',
+  )
+})
+
+test('行内按钮与菜单项共用同一个 store：菜单项入口也能打开同一个确认框', async () => {
+  const app = await loadClient()
+  app.setSessions({ 's-1': {} })
+
+  assert.equal(app.readStore(), null)
+  app.resolve()[0].run()
+
+  const store = app.readStore()
+  assert.equal(store.sessionId, 's-1')
+  assert.equal(store.displayTitle, '会话标题')
+})

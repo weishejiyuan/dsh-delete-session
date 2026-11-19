@@ -59,7 +59,15 @@ async function loadRowButton(fetchImpl = async () => ({ json: async () => ({ ok:
         return () => {}
       },
     },
-    contextMenus: { notify() {} },
+    contextMenus: {
+      register() {
+        return () => {}
+      },
+      notify() {},
+    },
+    effect(factory) {
+      return factory()
+    },
   }
   registration.factory(makeRequire()).apply(ctx)
   return { component: rowComponent, dictionary }

@@ -35,7 +35,14 @@ function makeRequire() {
 }
 
 function makeClientContext() {
-  const client = { locales: [], injections: [], slotRegistrations: [], notifications: [] }
+  const client = {
+    locales: [],
+    injections: [],
+    slotRegistrations: [],
+    menuContributions: [],
+    effects: [],
+    notifications: [],
+  }
   client.ctx = {
     locale: {
       register(ns, dicts) {
@@ -57,9 +64,19 @@ function makeClientContext() {
       },
     },
     contextMenus: {
+      register(contribution) {
+        client.menuContributions.push(contribution)
+        return () => {}
+      },
       notify(text, success) {
         client.notifications.push({ text, success })
       },
+    },
+    sessions: { list: { getSnapshot: () => ({ ids: [], byId: {} }), subscribe: () => () => {} } },
+    layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} } },
+    effect(factory, label) {
+      client.effects.push(label)
+      return factory()
     },
   }
   return client
@@ -107,11 +124,11 @@ test('factory 收到同步 require 并返回 name/inject/apply 三件套', async
   const { plugin } = await loadPlugin()
 
   assert.equal(plugin.name, 'delete-session-client')
-  assert.deepEqual([...plugin.inject], ['slots', 'locale', 'contextMenus'])
+  assert.deepEqual([...plugin.inject], ['slots', 'locale', 'contextMenus', 'sessions', 'layout'])
   assert.equal(typeof plugin.apply, 'function')
 })
 
-test('apply 注册 deleteSession 中英字典、行内按钮 slot（order 300）与 shell.overlay 确认框', async () => {
+test('apply 注册中英字典、行内按钮 slot（order 300）、shell.overlay 确认框与菜单图标 key', async () => {
   const { plugin, client } = await loadPlugin()
   plugin.apply(client.ctx)
 
@@ -126,8 +143,8 @@ test('apply 注册 deleteSession 中英字典、行内按钮 slot（order 300）
     assert.notEqual(locale.dicts[language].deleted.trim(), '', `${language} 成功提示不得为空`)
   }
 
-  assert.deepEqual(client.injections, [ROW_ACTION_SLOT, OVERLAY_SLOT])
-  assert.equal(client.slotRegistrations.length, 2)
+  assert.deepEqual(client.injections, [ROW_ACTION_SLOT, OVERLAY_SLOT, 'contextMenu.icon'])
+  assert.equal(client.slotRegistrations.length, 3)
 
   const options = client.slotRegistrations.find((entry) => entry.options.name === ROW_ACTION_SLOT).options
   assert.equal(options.id, 'delete-session')

@@ -12,6 +12,11 @@ window.__ModuleLoader__.load({
     const LOCALE_NAMESPACE = 'deleteSession'
     const ROW_ACTION_SLOT = 'sidebar.workspaces.session.row.action'
     const OVERLAY_SLOT = 'shell.overlay'
+    const CONTEXT_MENU_ICON_SLOT = 'contextMenu.icon'
+    // The menu id and the icon key are deliberately the same string in two
+    // different namespaces: the keyed icon slot only knows the latter.
+    const SESSION_MENU_ID = 'session.delete'
+    const SESSION_MENU_ICON_KEY = 'session.delete'
     const DELETE_ENDPOINT = '/delete-session/api/delete'
     const DANGER_TEXT_COLOR = 'var(--dsw-alias-state-error-primary)'
 
@@ -129,9 +134,10 @@ window.__ModuleLoader__.load({
 
     return {
       name: 'delete-session-client',
-      inject: ['slots', 'locale', 'contextMenus'],
+      inject: ['slots', 'locale', 'contextMenus', 'sessions', 'layout'],
       apply(ctx) {
         ctx.locale.register(LOCALE_NAMESPACE, messages)
+        const translate = ctx.locale.bind(LOCALE_NAMESPACE)
 
         // One POST per in-flight window: a second confirm click while the first
         // request is on the wire sends nothing.
@@ -275,6 +281,33 @@ window.__ModuleLoader__.load({
           )
         }
 
+        /**
+         * The second entry point: the Session menu resolves the same visibility
+         * rule as the row button from the same sources. A blank row has no
+         * directory to delete, so it returns no action at all instead of a
+         * disabled one. When both reasons hold, "current Session" wins the label.
+         */
+        function resolveSessionDelete(target) {
+          const row = ctx.sessions.list.getSnapshot().byId[target.sessionId]
+          if (row === undefined || row.blank === true) return []
+          const panelActive = ctx.layout.panelInfo.getSnapshot().activePanelId !== null
+          const isCurrent = !panelActive && (row.retainedBy?.mainView ?? 0) > 0
+          const running = row.running === true
+          return [{
+            id: 'delete',
+            label: translate(
+              isCurrent ? 'label.deleteCurrentDisabled' : running ? 'sessionActive' : 'label.deletePermanently',
+            ),
+            icon: { key: SESSION_MENU_ICON_KEY },
+            danger: true,
+            separatorBefore: true,
+            ...(isCurrent || running ? { disabled: true } : {}),
+            run: () => {
+              openDeleteRequest({ sessionId: target.sessionId, displayTitle: target.displayTitle })
+            },
+          }]
+        }
+
         ctx.slots.inject(ROW_ACTION_SLOT, () =>
           ctx.slots.register(
             { name: ROW_ACTION_SLOT, id: 'delete-session', order: 300, locale: LOCALE_NAMESPACE },
@@ -288,6 +321,21 @@ window.__ModuleLoader__.load({
             DeleteSessionConfirm,
           ),
         )
+
+        ctx.slots.inject(CONTEXT_MENU_ICON_SLOT, () =>
+          ctx.slots.register(
+            { name: CONTEXT_MENU_ICON_SLOT, key: SESSION_MENU_ICON_KEY },
+            IconTrashOutlineRegular,
+          ),
+        )
+
+        ctx.effect(() => ctx.contextMenus.register({
+          id: SESSION_MENU_ID,
+          target: 'session',
+          order: 700,
+          observe: () => [ctx.sessions.list, ctx.layout.panelInfo, ctx.locale],
+          resolve: resolveSessionDelete,
+        }), 'delete-session: session menu')
       },
     }
   },
