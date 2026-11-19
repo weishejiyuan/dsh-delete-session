@@ -16,15 +16,23 @@ E:\ai编程需要的软件安装包\dsh-delete-session
 
 1. **Client 半不是 ESM**。必须写成 classic script，加载时立即 `window.__ModuleLoader__.load({id, factory})` 注册工厂，依赖通过工厂收到的同步 `require` 取。写成 `export function apply(ctx)` 会报 `loaded without registering`。
 2. **不引入打包器**。手写工厂包装，用 `React.createElement` 而非 JSX。不建 `locale/*.json`，字符串内联。
-3. **删除顺序不可交换**：活动检查 → 递归删文件 → 清 archive → 清 pin。活动检查必须在任何文件操作之前。
+3. **删除顺序不可交换**：活动闸门 → `sessionPersistence.stat` 定位 → sessions 根围栏 → `rm -rf` → `unarchiveSession` → `unpinSession` → 发 `api-session/removed`。活动检查必须在任何文件操作之前。
 
 ## 当前状态
 
-功能已实现（ticket 01–06），代码侧由 66 条自动化测试覆盖：`npm test`。
+**实现完成，已装真机，用户确认可用。**
 
-实机人工验收**尚未执行**，逐条清单在 [`docs/manual-acceptance.md`](./docs/manual-acceptance.md)；与已装插件的冲突复核结果在 [`docs/conflict-audit-result.md`](./docs/conflict-audit-result.md)；实现期逐条核实的 DSH 源码契约（槽位/菜单/locale/路由/会话存储/安装机制，带文件行号与对账结论）在 [`docs/dsh-source-facts.md`](./docs/dsh-source-facts.md)。
+- 代码侧由 66 条自动化测试覆盖：`npm test`（`node --test`，零依赖）
+- 真机验收记录：[`docs/manual-acceptance.md`](./docs/manual-acceptance.md)（3 项逐条留证，其余为用户确认通过但未逐条留证）
+- 与已装插件的冲突复核：[`docs/conflict-audit-result.md`](./docs/conflict-audit-result.md)
+- 实现期逐条核实的 DSH 源码契约（槽位/菜单/locale/路由/会话存储/安装机制，带文件行号与对账结论）：[`docs/dsh-source-facts.md`](./docs/dsh-source-facts.md)
 
 后两份是指向 `0.2.2-rc.3` 本机解包态的**快照**：DSH 升级后行号会漂移，重审前先按 `docs/dsh-source-facts.md` 末节「与设计文档不一致处」的方法重核。
+
+## 两条容易回退的坑
+
+- **删完必须发 `api-session/removed`**。`session.list` 是「磁盘行 + 本进程仍驻留的会话行」的并集，只删文件不通知，会话行会留在侧栏变幽灵行；`sessions.refresh()` 修不掉（内存里那份照样在）。详见设计仓库的 `docs/adr/0006-no-auto-switch.md`。
+- **当前会话不置灰**。只保留运行中置灰——最后一个会话置灰会造成既不能删也不能切走的死锁。
 
 ## 安装
 
