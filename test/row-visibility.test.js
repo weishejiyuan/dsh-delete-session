@@ -51,12 +51,11 @@ async function loadRowButton(fetchImpl = async () => ({ json: async () => ({ ok:
       },
     },
     slots: {
-      inject(key, callback) {
-        assert.equal(key, ROW_ACTION_SLOT)
+      inject(_key, callback) {
         return callback()
       },
-      register(_options, component) {
-        rowComponent = component
+      register(options, component) {
+        if (options.name === ROW_ACTION_SLOT) rowComponent = component
         return () => {}
       },
     },
