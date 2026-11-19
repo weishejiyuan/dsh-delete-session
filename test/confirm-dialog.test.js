@@ -146,6 +146,68 @@ test('点永久删除：恰好一次 POST，成功后关框并提示「会话已
   assert.equal(renderDialog(loaded), null, '成功后 store 应清空')
 })
 
+test('删除成功后请求宿主重列会话：Host 直接删文件，不 refresh 侧栏会留着已删的行', async () => {
+  const loaded = await loadPlugin()
+  openFromRow(loaded)
+  const { confirm } = renderDialog(loaded)
+
+  confirm.props.onClick()
+  await settle()
+
+  assert.equal(loaded.refreshes.length, 1, '成功后必须调用一次 ctx.sessions.refresh()')
+})
+
+test('SESSION_NOT_FOUND 也触发重列：幽灵行会在侧栏自行消失，用户不必反复点', async () => {
+  const loaded = await loadPlugin({
+    fetchImpl: async () => jsonResponse({ ok: false, code: 'SESSION_NOT_FOUND' }, 404),
+  })
+  openFromRow(loaded)
+  const { confirm } = renderDialog(loaded)
+
+  confirm.props.onClick()
+  await settle()
+
+  assert.equal(loaded.refreshes.length, 1)
+  assert.equal(loaded.notifications.length, 0, '失败不弹成功提示')
+})
+
+test('取消、运行中被拒、删除失败都不触发重列（列表没变，不必打扰宿主）', async () => {
+  const cancelled = await loadPlugin()
+  openFromRow(cancelled)
+  renderDialog(cancelled).cancel.props.onClick()
+  await settle()
+  assert.equal(cancelled.refreshes.length, 0, '取消不应 refresh')
+
+  const active = await loadPlugin({
+    fetchImpl: async () => jsonResponse({ ok: false, code: 'SESSION_ACTIVE' }, 409),
+  })
+  openFromRow(active)
+  renderDialog(active).confirm.props.onClick()
+  await settle()
+  assert.equal(active.refreshes.length, 0, '运行中被拒不应 refresh')
+
+  const failed = await loadPlugin({
+    fetchImpl: async () => jsonResponse({ ok: false, code: 'DELETE_FAILED', message: 'EBUSY' }, 500),
+  })
+  openFromRow(failed)
+  renderDialog(failed).confirm.props.onClick()
+  await settle()
+  assert.equal(failed.refreshes.length, 0, '删除失败不应 refresh')
+})
+
+test('refresh 自身抛错不影响成功提示与关框（列表过期只是观感债）', async () => {
+  const loaded = await loadPlugin()
+  loaded.ctx.sessions.refresh = async () => {
+    throw new Error('rpc down')
+  }
+  openFromRow(loaded)
+  renderDialog(loaded).confirm.props.onClick()
+  await settle()
+
+  assert.equal(renderDialog(loaded), null, '仍然关框')
+  assert.deepEqual(loaded.notifications, [{ text: '会话已永久删除', success: true }])
+})
+
 test('请求进行中：独立状态行显示「正在删除…」、按钮文案不变、两按钮禁用、连点不产生第二个请求', async () => {
   let release
   const loaded = await loadPlugin({ fetchImpl: () => new Promise((resolve) => { release = resolve }) })

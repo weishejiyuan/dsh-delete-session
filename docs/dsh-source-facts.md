@@ -865,3 +865,13 @@ ctx.slots.inject("shell.overlay", () => ctx.slots.register({
 10. **更好的删除定位方式**：`ctx.sessionPersistence.stat(id)` → `undefined` 即不存在（= `SESSION_NOT_FOUND` 的权威判定）；`snapshot.location.path` 即落盘文件绝对路径，`dirname` 就是会话目录。比「遍历所有 project 目录 × 两种命名」稳得多，也自动排除「空白未落盘会话」。（`dsh-session-persistence/src/index.ts:203`、`:62-67`、`errors.ts:85-90`）
 11. **`workspaceRegistry` 的清理语义 ADR 描述准确**，但补一条：`archiveSession` 会校验会话存在并抛 `WorkspaceUnknownSessionError`；`unarchiveSession`/`unpinSession` **不校验**——所以顺序真无所谓，且可以用它们兜底清理已删文件的孤儿 id。
 12. **`@deepseek-ai/*` 在 profile 里可 import**（安装树 BFS + runtime 拦截解析，`profile.ts:373-421`、`resolver.ts:829+`），即使 `PROF/node_modules/@deepseek-ai/` 是空目录。但最省事的是只用 `node:*` 内置模块（照 `@local/dsh-clear-command`）。
+
+## 12. 客户端会话列表的刷新（2026-11-19 实测补充）
+
+**结论：Host 直接改磁盘不会让侧栏重列，必须显式调用 `ctx.sessions.refresh()`。**
+
+- 客户端会话列表的唯一来源是 `ctx.sessions.list`（`ObservableSnapshot<SessionListState>`，`dsh-api-session-controller/src/client/contract/sessions.ts:51`）。
+- 重新取列表只有一条路：`ISessions.refresh()` → `SessionManager.refreshList()` → 向 Host 发一次 `session.list` RPC（`client/sessions/service.ts:372-373`、`client/sessions/manager.ts:394-395`，单飞）。
+- Host 的 `list` 读磁盘（持久化层），所以**文件删掉后只要 refresh 一次，行就会消失**；不 refresh 则快照一直是旧的，行会留在侧栏。
+- 因此任何绕过会话服务、直接操作磁盘的插件，删除/移动/新建会话之后都要自己 `refresh()`（本插件：删除成功后、以及收到 `SESSION_NOT_FOUND` 时各调一次，后者用于清掉上一次遗留的幽灵行）。
+- 对照：官方 `archiveSession` 走 registry 写入 + 事件，客户端本来就有反应式来源，所以它不需要手动 refresh。这是「直接改磁盘」这条绕路必须自己补的成本。

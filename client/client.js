@@ -149,9 +149,10 @@ window.__ModuleLoader__.load({
       if (result === undefined) {
         return { ok: false, message: withReason(translate('deleteFailed'), `HTTP ${response.status}`) }
       }
-      if (result.ok === true && result.code === 'OK') return { ok: true }
-      return { ok: false, message: failureLine(result, translate) }
+      if (result.ok === true && result.code === 'OK') return { ok: true, code: result.code }
+      return { ok: false, code: result.code, message: failureLine(result, translate) }
     }
+
 
     /**
      * Single source of the visibility matrix: a blank row hides, a running
@@ -186,6 +187,20 @@ window.__ModuleLoader__.load({
         // One POST per in-flight window: a second confirm click while the first
         // request is on the wire sends nothing.
         let inFlight = null
+
+        /**
+         * The Host deletes files directly, so nothing tells the Session controller
+         * to re-list: `ctx.sessions.list` keeps rendering the deleted row until a
+         * `session.list` RPC runs. Ask for that refresh once the list may have changed.
+         * A failed refresh is never worth surfacing — the deletion is already committed.
+         */
+        async function refreshSessionList() {
+          try {
+            await ctx.sessions?.refresh?.()
+          } catch {
+            /* a stale row is cosmetic debt; the delete itself stands */
+          }
+        }
 
         /** Re-renders on store changes; the snapshot itself is read at render. */
         function useDeleteRequest() {
@@ -223,14 +238,18 @@ window.__ModuleLoader__.load({
             if (deleting || inFlight !== null) return
             setDeleting(true)
             setFailure(null)
-            inFlight = postDelete(request.sessionId, translate).then((outcome) => {
+            inFlight = postDelete(request.sessionId, translate).then(async (outcome) => {
               inFlight = null
               setDeleting(false)
               if (outcome.ok) {
+                await refreshSessionList()
                 closeDeleteRequest()
                 ctx.contextMenus.notify(translate('deleted'), true)
                 return
               }
+              // `SESSION_NOT_FOUND` means this row is a ghost left by an earlier
+              // deletion that never got re-listed; refresh drops it from the sidebar.
+              if (outcome.code === 'SESSION_NOT_FOUND') await refreshSessionList()
               setFailure(outcome.message)
             })
           }

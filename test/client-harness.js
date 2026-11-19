@@ -150,6 +150,7 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
   const menuContributions = []
   const effects = []
   const notifications = []
+  const refreshes = []
   let sessionsSnapshot = sessionState({})
 
   const ctx = {
@@ -188,6 +189,10 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
         getSnapshot: () => sessionsSnapshot,
         subscribe: () => () => {},
       },
+      /** Host deletes files directly, so the plugin must ask for a re-list itself. */
+      async refresh() {
+        refreshes.push(Date.now())
+      },
     },
     effect(factory, label) {
       effects.push(label)
@@ -216,6 +221,7 @@ export async function loadPlugin({ fetchImpl = async () => jsonResponse({ ok: tr
     menuContributions,
     effects,
     notifications,
+    refreshes,
     fetches,
     translator: (target) => makeTranslator(dictionary, target),
     t: makeTranslator(dictionary, language),
