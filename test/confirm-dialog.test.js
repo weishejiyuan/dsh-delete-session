@@ -397,6 +397,68 @@ test('网络异常：框内显示「删除失败」加原始消息', async () =>
   assert.equal(renderDialog(app).modal.children[0].children[0], '删除失败 — Failed to fetch')
 })
 
+/** A response whose body is an HTML error page instead of the endpoint's JSON. */
+function nonJsonResponse(status) {
+  return {
+    status,
+    json: async () => {
+      throw new SyntaxError('Unexpected token \'<\', "<html><head" is not valid JSON')
+    },
+  }
+}
+
+test('非 2xx 且响应体不是 JSON：文案回落为「删除失败 — HTTP <status>」，不暴露解析器错误', async () => {
+  const app = await loadClient({ fetchImpl: async () => nonJsonResponse(502) })
+  openFromRow(app)
+  const { confirm } = renderDialog(app)
+
+  confirm.props.onClick()
+  await settle()
+
+  assert.equal(app.notifications.length, 0)
+  const line = renderDialog(app).modal.children[0].children[0]
+  assert.equal(line, '删除失败 — HTTP 502')
+  assert.doesNotMatch(line, /Unexpected token|is not valid JSON|SyntaxError/)
+})
+
+test('2xx 但响应体不是 JSON：同样回落为 HTTP 状态，不当作成功也不暴露解析器错误', async () => {
+  for (const response of [nonJsonResponse(200), { status: 200, json: async () => null }]) {
+    const app = await loadClient({ fetchImpl: async () => response })
+    openFromRow(app)
+    const { confirm } = renderDialog(app)
+
+    confirm.props.onClick()
+    await settle()
+
+    assert.equal(app.notifications.length, 0, 'body 不可读时不得提示成功')
+    const line = renderDialog(app).modal.children[0].children[0]
+    assert.equal(line, '删除失败 — HTTP 200')
+    assert.doesNotMatch(line, /Unexpected token|is not valid JSON|SyntaxError/)
+  }
+})
+
+test('四个前置守卫码落到可读兜底：有 message 拼上原因，无 message 只显示「删除失败」', async () => {
+  const cases = [
+    [{ ok: false, code: 'METHOD_NOT_ALLOWED' }, 405, '删除失败'],
+    [{ ok: false, code: 'INVALID_SESSION_ID' }, 400, '删除失败'],
+    [{ ok: false, code: 'NOT_FOUND' }, 404, '删除失败'],
+    [{ ok: false, code: 'REJECTED', message: 'request rejected (403)' }, 403, '删除失败 — request rejected (403)'],
+  ]
+
+  for (const [body, status, expected] of cases) {
+    const app = await loadClient({ fetchImpl: async () => jsonResponse(body, status) })
+    openFromRow(app)
+    const { confirm } = renderDialog(app)
+
+    confirm.props.onClick()
+    await settle()
+
+    const line = renderDialog(app).modal.children[0].children[0]
+    assert.equal(line, expected, `${body.code} 的框内文案`)
+    assert.equal(line.includes(body.code), false, `${body.code} 不得作为机器码漏给用户`)
+  }
+})
+
 test('确认框注册到 shell.overlay：id / locale 正确，不传 priority', async () => {
   const app = await loadClient()
 
