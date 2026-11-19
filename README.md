@@ -86,3 +86,22 @@ dsh plugin --profile desktop remove @local/dsh-delete-session
 
 **无需清理任何持久化数据**：本插件没有配置文件、没有独立数据库，也不修改 DSH 的持久化结构。它唯一的写操作是删除会话目录本身，以及用宿主 registry 的 API 把该会话从归档/置顶集合里摘掉——两者都只作用于「已经被删掉的会话」，回滚插件不会留下需要手工清理的残留。
 
+## 自动备份
+
+每次 `git commit` 后，`.git/hooks/post-commit` 会调 `tools/sync-to-backup.ps1` 把本仓库镜像到：
+
+```
+D:\dsh-delete-session备份\code\dsh-delete-session
+```
+
+用 `robocopy /MIR`（镜像，会删除备份侧多余文件），带 `.git` 一起同步，所以备份是完整可恢复的仓库而非文件快照。同步失败不会阻塞 commit，但脚本会往 stderr 写原因。
+
+**hook 不受版本控制**，它住在 `.git/hooks/` 里。以下情况需要重新安装：
+
+- 重新 `git clone` 或新建仓库
+- 从备份恢复后想换一台机器用
+
+重装就是把 `.git/hooks/post-commit` 写成调用 `powershell -NoProfile -ExecutionPolicy Bypass -File "tools/sync-to-backup.ps1"` 的一行 sh 脚本。脚本本体 `tools/sync-to-backup.ps1` 是版本化的，不会丢。
+
+**为什么脚本是 `.ps1` 而不是 `.cmd`**：目标路径含中文，`cmd.exe` 在中文代码页下读 UTF-8 的 `.cmd` 会把多字节字符拆开、整行命令被截断（实测报 `'obocopy' is not recognized` 这类错误）。PowerShell 脚本带 UTF-8 BOM 就能正确解析中文路径字面量。改这个脚本时注意保持 BOM。
+
