@@ -228,5 +228,19 @@ function visibilityOf(row) {
 
 ---
 
-> **注**：本仓库仅包含插件实现代码。完整的设计文档、决策记录、测试用例、安装验收清单在另一个仓库中。如果你只是想安装使用该插件，只需克隆本仓库并按「安装方法」一节操作即可。
+## 8. 设计文档与决策记录
+
+设计文档、决策记录和实现细节请参阅：[docs/](docs/) 目录。
+
+- [0000-naming-conventions.md](docs/0000-naming-conventions.md)：命名与规范单一真理来源
+- [0001-delete-session-via-filesystem.md](docs/0001-delete-session-via-filesystem.md)：删除实现决策
+- [0002-host-client-transport.md](docs/0002-host-client-transport.md)：Host↔Client 通信决策
+- [0003-two-entry-points.md](docs/0003-two-entry-points.md)：双入口设计决策
+- [0004-disable-current-session.md](docs/0004-disable-current-session.md)：当前会话判定决策
+- [0005-no-undo-window.md](docs/0005-no-undo-window.md)：不提供撤销窗口决策
+- [0006-no-auto-switch.md](docs/0006-no-auto-switch.md)：删除后不自动切换会话决策
+
+---
+
+> **注**：完整的设计文档、决策记录、测试用例、安装验收清单在另一个仓库中。如果你只是想安装使用该插件，只需克隆本仓库并按「安装方法」一节操作即可。
 
