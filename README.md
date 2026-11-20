@@ -1,107 +1,264 @@
-# @local/dsh-delete-session
+# @local/dsh-delete-session — DSH 桌面端会话永久删除插件
 
-DSH 桌面端的「会话永久删除」插件。两个入口：会话行内按钮 + 会话右键菜单。
+为 DeepSeek Harness (DSH) 桌面端增加「会话永久删除」功能。
 
-## 这个仓库是什么
+DSH 原生只支持「归档」会话（从侧栏隐藏，磁盘文件仍留在原处），没有真正删除会话的入口。本插件补齐这个缺口：会话行右侧出现删除按钮，右键菜单中出现「永久删除」选项，点击后会话的磁盘目录会被递归删除，workspace 注册表中的归档与置顶标记也会被清除，搜索索引由 DSH 自己的对账机制自动收敛。
 
-只放**实现代码**。设计文档、决策记录、ticket 在另一个仓库：
+---
 
-```
-E:\ai编程需要的软件安装包\dsh-delete-session
-```
+## 1. 项目解决什么问题
 
-写代码前必须先读那边的 `AGENTS.md`——它含当前状态、文档地图，以及三条动手前硬约束。
+| 操作 | DSH 原生 | 本插件 |
+|---|---|---|
+| 归档会话（移出侧栏，文件仍在） | ✅ | — |
+| 置顶会话 | ✅ | — |
+| **永久删除会话（连磁盘目录一起清）** | ❌ | ✅ |
+| 删除后自动从搜索索引消失 | — | ✅（由 DSH 索引对账机制自动完成） |
 
-## 三条硬约束（摘要，详见设计仓库的 AGENTS.md）
+没有本插件时，想彻底清掉一个会话只能手动去 `~/.dsh/sessions/<project>/<sessionId>/` 翻目录删除，或者重装 DSH。
 
-1. **Client 半不是 ESM**。必须写成 classic script，加载时立即 `window.__ModuleLoader__.load({id, factory})` 注册工厂，依赖通过工厂收到的同步 `require` 取。写成 `export function apply(ctx)` 会报 `loaded without registering`。
-2. **不引入打包器**。手写工厂包装，用 `React.createElement` 而非 JSX。不建 `locale/*.json`，字符串内联。
-3. **删除顺序不可交换**：活动闸门 → `sessionPersistence.stat` 定位 → sessions 根围栏 → `rm -rf` → `unarchiveSession` → `unpinSession` → 发 `api-session/removed`。活动检查必须在任何文件操作之前。
+---
 
-## 当前状态
+## 2. 主要功能
 
-**实现完成，已装真机，用户确认可用。**
+### 2.1 两个删除入口
 
-- 代码侧由 66 条自动化测试覆盖：`npm test`（`node --test`，零依赖）
-- 真机验收记录：[`docs/manual-acceptance.md`](./docs/manual-acceptance.md)（3 项逐条留证，其余为用户确认通过但未逐条留证）
-- 与已装插件的冲突复核：[`docs/conflict-audit-result.md`](./docs/conflict-audit-result.md)
-- 实现期逐条核实的 DSH 源码契约（槽位/菜单/locale/路由/会话存储/安装机制，带文件行号与对账结论）：[`docs/dsh-source-facts.md`](./docs/dsh-source-facts.md)
+- **会话行内按钮**：会话行 hover 时，右侧按钮条出现垃圾桶图标（悬停 500ms 显示「永久删除」Tooltip）。
+- **右键菜单**：会话行右键，菜单底部（在「归档」项之后）出现「永久删除」，带上方分隔线和危险色图标。
 
-后两份是指向 `0.2.2-rc.3` 本机解包态的**快照**：DSH 升级后行号会漂移，重审前先按 `docs/dsh-source-facts.md` 末节「与设计文档不一致处」的方法重核。
+两个入口共用同一套可见性规则和同一个确认框。
 
-## 两条容易回退的坑
+### 2.2 确认框防误删
 
-- **删完必须发 `api-session/removed`**。`session.list` 是「磁盘行 + 本进程仍驻留的会话行」的并集，只删文件不通知，会话行会留在侧栏变幽灵行；`sessions.refresh()` 修不掉（内存里那份照样在）。详见设计仓库的 `docs/adr/0006-no-auto-switch.md`。
-- **当前会话不置灰**。只保留运行中置灰——最后一个会话置灰会造成既不能删也不能切走的死锁。
+点删除后不会直接执行，而是弹出全窗口确认框：
+- 显示被删除会话的标题
+- 副文案：“此操作不可撤销”
+- 左侧「取消」，右侧「永久删除」（危险色文字，非实心红块）
+- 点「取消」什么都不发生；点「永久删除」才执行删除
 
-## 安装
+### 2.3 删除执行流程（Host 半）
 
-调试本仓库的代码时安装的是**这个目录**，DSH 直接从工作区读代码，不需要 `npm pack`/`npm publish`。
+删除执行四步，顺序不可交换：
 
-### 前提
+1. **活动检查** —— 询问 DSH 该会话是否还有运行中的工作（回话、子 agent、后台 job、定时任务）。有则拒绝，不碰磁盘。
+2. **递归删除文件** —— 通过持久化层定位会话目录，确认在 sessions 根目录内，递归删除目录及日志文件。
+3. **清归档标记** —— 把该会话从 workspace 的归档集合移除。
+4. **清置顶标记** —— 把该会话从 workspace 的置顶集合移除。
 
-1. **必须用桌面安装目录自带的 `dsh.cmd`**（形如 `<安装目录>\resources\app\runtime\cli\bin\dsh.cmd`，它带 `--expose-internals` 调 `dsh-desktop-host/lib/cli.js`）。
-   不能用 `node ...\node_modules\@deepseek-ai\dsh\lib\bin.js`：`--profile desktop` 会被 `rejectElectronProfile` 直接拒掉（`error: profile "desktop" is managed exclusively by the Electron application`），因为只有桌面端 CLI 载体才会传 `manageDesktopProfile: true`。
-2. **桌面端至少启动过一次**，让 `~/.dsh/profiles/desktop/package.json` 存在。否则 `dsh plugin` 会报 `Open DeepSeek Harness Desktop once to initialize its profile, then fully quit it before running dsh plugin --profile desktop.`
-3. **装前完全退出 DSH**（托盘退出，任务管理器确认 `DeepSeek Harness.exe` 已结束）。
+删除成功后，Host 半会向客户端广播 `workspace/session-removed` 事件，让侧栏立刻消失该会话，不会留下幽灵行。
 
-### 命令
+删除是**整体成功或整体失败**：所有步骤都完成才返回成功；中途任一步抛错即整体失败，不做部分成功报告。
+
+### 2.4 可见性规则
+
+| 会话状态 | 行内按钮 | 右键菜单项 |
+|---|---|---|
+| 普通会话 | 显示，可点 | 显示，可点 |
+| 当前会话（正在主视图展示） | 显示，可点 | 显示，可点 |
+| 运行中会话（有活跃工作） | 显示，置灰 | 显示，置灰 |
+| 已归档会话 | 显示，可点 | 显示，可点 |
+| 空白新会话（未落盘） | 不显示 | 不显示 |
+
+运行中会话置灰时，悬停提示「会话正在运行，请先停止」；任务结束后自动恢复可点。空白会话没有落盘目录，删除没有意义，因此不显示入口。
+
+---
+
+## 3. 安装方法
+
+### 3.1 前提
+
+1. DSH 桌面端已安装，且至少启动过一次（让 `~/.dsh/profiles/desktop/package.json` 存在）。
+2. **装插件前完全退出 DSH**（托盘退出，任务管理器确认 `DeepSeek Harness.exe` 已结束）。
+3. 必须使用桌面安装目录自带的 `dsh` 命令行工具（形如 `<安装目录>\resources\app\runtime\cli\bin\dsh.cmd`，带 `--expose-internals` 调用 `dsh-desktop-host`），不能用 `node ...\node_modules\@deepseek-ai\dsh\lib\bin.js`。
+
+### 3.2 安装命令
 
 ```bat
-:: 完全退出 DSH 之后执行（路径换成你的仓库路径）
-dsh plugin --profile desktop add link:E:\develop\dsh-plugins\dsh-delete-session
+dsh plugin --profile desktop add link:<你的插件目录路径>
 ```
 
-`link:` 指向绝对路径时会被原样透传给 pnpm，不做路径改写。
+例如本仓库克隆到本地后：
 
-### 装完检查
+```bat
+dsh plugin --profile desktop add link:C:\path\to\dsh-delete-session
+```
 
-1. `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` **末尾**出现 `@local/dsh-delete-session`（新装的 bundle 永远追加在最后，位置即层顺序）。
-2. `~/.dsh/profiles/desktop/node_modules/@local/dsh-delete-session` 是指向仓库的符号链接。
-3. 启动 DSH：侧栏会话行 hover 出现 trash 按钮，右键菜单底部出现「永久删除」。
+`link:` 方式安装：插件以**目录联接**形式挂进 profile，**改代码后重启 DSH 即生效**，不需要重新安装。
 
-### 为什么 `package.json` 里的 `dsh.bundle.patch` 是成为 profile 层的前提
+### 3.3 验证安装
 
-`add` 成功（pnpm exit 0）后，`dsh-plugin-manager` 会对新装的 dependency 做 reconcile：
+1. `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` 末尾出现 `@local/dsh-delete-session`。
+2. `~/.dsh/profiles/desktop/node_modules/@local/dsh-delete-session` 是指向你仓库目录的符号链接（Junction）。
+3. 启动 DSH：侧栏会话行 hover 出现垃圾桶按钮，右键菜单底部出现「永久删除」。
 
-- 包**没有** `dsh.bundle` → 只当普通依赖装上，打一条 warning 并**不加入** `dsh.profile.bundles`，插件不会加载：
-  `dsh: warning: <name> declares no dsh.bundle — installed as a plain dependency, not a profile layer`
-- 包**有** `dsh.bundle` → 校验平台、预加载其 patch 文件，然后把包名 append 到 `dsh.profile.bundles` 并原子写回 `package.json`。
-
-本包的 `package.json` 因此声明了 `dsh.bundle.patch: "./cordis.patch.yml"`。
-
-`cordis.patch.yml` **只插一行 Host 半**。Client 半由 `dsh-client-modules` 扫描 `package.json` 的 `dsh.client` 字段自动发现，不需要（也**不能**）在 patch 里再插一行——同一个包出现两个 Loader 源会让整包 client 半加载失败：
-`client-modules: package <name> resolves from multiple active Loader sources`。
-
-## 回滚
+### 3.4 回滚
 
 ```bat
 :: 完全退出 DSH 之后执行
 dsh plugin --profile desktop remove @local/dsh-delete-session
 ```
 
-然后重启 DSH。`remove` 会把 `package.json` 的 dependency、`pnpm-lock.yaml`、`node_modules` 链接，以及 `dsh.profile.bundles` 里对应条目一起回滚（`dsh-plugin-manager` 的 reconcile 会剔除「已不再是 dependency」的 bundle）。
+然后重启 DSH。`remove` 会把 `package.json` 的 dependency、`pnpm-lock.yaml`、`node_modules` 链接，以及 `dsh.profile.bundles` 里对应条目一起回滚。
 
 也可以直接删掉 `~/.dsh/profiles/desktop/node_modules/@local/dsh-delete-session` 链接后重启；效果相同，但 `dsh.profile.bundles` 里的条目会残留到下一次 `add`/`remove` 才被收敛，所以优先用 `remove`。
 
 **无需清理任何持久化数据**：本插件没有配置文件、没有独立数据库，也不修改 DSH 的持久化结构。它唯一的写操作是删除会话目录本身，以及用宿主 registry 的 API 把该会话从归档/置顶集合里摘掉——两者都只作用于「已经被删掉的会话」，回滚插件不会留下需要手工清理的残留。
 
-## 自动备份
+---
 
-每次 `git commit` 后，`.git/hooks/post-commit` 会调 `tools/sync-to-backup.ps1` 把本仓库镜像到：
+## 4. 使用方法
+
+### 4.1 删除一个会话
+
+1. 在左侧会话栏找到要删除的会话。
+2. 鼠标悬停在会话行上，右侧出现垃圾桶图标按钮；或者右键点击会话行。
+3. 点删除按钮 / 选择「永久删除」，弹出确认框。
+4. 确认框显示会话标题和「此操作不可撤销」提示。
+5. 点「永久删除」执行；点「取消」则关闭对话框，不做任何更改。
+
+删除成功后：会话从侧栏消失，弹出「会话已永久删除」提示。
+
+### 4.2 什么时候删不了
+
+| 情况 | 表现 |
+|---|---|
+| 会话正在运行（生成回复中） | 按钮置灰，悬停提示「会话正在运行，请先停止」。任务结束后自动恢复 |
+| 会话不存在（可能已被删） | 提示「会话不存在，可能已被删除」 |
+| 删除过程出错（权限、文件占用等） | 提示「删除失败」并附上具体原因 |
+
+### 4.3 已归档会话
+
+已归档的会话也显示删除入口，可以直接删除，不需要先取消归档。
+
+### 4.4 空白新会话
+
+还没发过消息、尚未落盘的空白会话行不显示删除入口——它没有目录可删，删除只会报错。
+
+---
+
+## 5. 输入输出示例
+
+### 5.1 用户在界面上的操作
 
 ```
-D:\dsh-delete-session备份\code\dsh-delete-session
+[会话行 hover]  →  右侧出现垃圾桶图标按钮（悬停 500ms 显示「永久删除」）
+       ↓ 点击
+[确认框]  ┌─────────────────────────────────────┐
+          │ 永久删除会话                        │
+          │ 将永久删除「帮我重构登录模块」，      │
+          │ 此操作不可撤销。                    │
+          │              [取消] [永久删除]      │
+          └─────────────────────────────────────┘
+       ↓ 点「永久删除」
+[提示]   ✓ 会话已永久删除
 ```
 
-用 `robocopy /MIR`（镜像，会删除备份侧多余文件），带 `.git` 一起同步，所以备份是完整可恢复的仓库而非文件快照。同步失败不会阻塞 commit，但脚本会往 stderr 写原因。
+### 5.2 插件 Host 与 Client 之间的请求/响应
 
-**hook 不受版本控制**，它住在 `.git/hooks/` 里。以下情况需要重新安装：
+Client 半向 Host 半发送 POST 请求：
 
-- 重新 `git clone` 或新建仓库
-- 从备份恢复后想换一台机器用
+```http
+POST /delete-session/api/delete
+Content-Type: application/json
 
-重装就是把 `.git/hooks/post-commit` 写成调用 `powershell -NoProfile -ExecutionPolicy Bypass -File "tools/sync-to-backup.ps1"` 的一行 sh 脚本。脚本本体 `tools/sync-to-backup.ps1` 是版本化的，不会丢。
+{
+  "sessionId": "session-01J8X2K9ABC"
+}
+```
 
-**为什么脚本是 `.ps1` 而不是 `.cmd`**：目标路径含中文，`cmd.exe` 在中文代码页下读 UTF-8 的 `.cmd` 会把多字节字符拆开、整行命令被截断（实测报 `'obocopy' is not recognized` 这类错误）。PowerShell 脚本带 UTF-8 BOM 就能正确解析中文路径字面量。改这个脚本时注意保持 BOM。
+Host 半响应（成功）：
 
+```json
+{
+  "ok": true,
+  "code": "OK"
+}
+```
+
+各种失败情况：
+
+| HTTP 状态 | 返回 body | 触发条件 |
+|---|---|---|
+| 200 | `{ "ok": true, "code": "OK" }` | 删除成功 |
+| 409 | `{ "ok": false, "code": "SESSION_ACTIVE", "message": "会话正在运行，请先停止" }` | 会话仍有运行中的工作 |
+| 404 | `{ "ok": false, "code": "SESSION_NOT_FOUND", "message": "会话不存在，可能已被删除" }` | 两种命名形态的目录都不存在 |
+| 500 | `{ "ok": false, "code": "DELETE_FAILED", "message": "<具体原因>" }` | 递归删除或 registry 清理抛错 |
+| 405 | `{ "ok": false, "code": "METHOD_NOT_ALLOWED" }` | 非 POST 请求 |
+| 400 | `{ "ok": false, "code": "INVALID_SESSION_ID" }` | 请求体缺 sessionId 或为空 |
+
+### 5.3 可见性规则示例（代码层面）
+
+```js
+// 伪代码，示意行内按钮和右键菜单共用同一套判断
+function visibilityOf(row) {
+  if (row === undefined || row.blank === true) {
+    return { show: false, disabled: false }   // 空白会话：不显示
+  }
+  const running = row.running === true
+  return {
+    show: true,
+    disabled: running,                        // 运行中：显示但禁用
+    labelKey: running ? 'sessionActive' : 'label.deletePermanently'
+  }
+}
+```
+
+---
+
+## 6. 已知限制
+
+- **删除不可逆**：没有撤销窗口，没有回收站。误删只能从备份/卷影副本/文件系统恢复，DSH 不提供内置路径。
+- **运行中会话不能被删除**：要删除正在生成回复的会话，先停止任务再删。
+- **只作用于会话级**：不处理 workspace 记录、不碰 workspace 自身的 `sessionIds` 数组（那是 workspace 级记录，由 DSH 自己维护）。
+- **安装绑定 desktop profile**：本插件按 `--profile desktop` 安装，换 profile 需重装。
+
+---
+
+## 7. 开发
+
+### 6.1 目录结构
+
+```
+dsh-delete-session/
+├── package.json          # 包声明、dsh.client 字段、peerDependencies
+├── cordis.patch.yml      # 只插一行 Host 行（Client 半由 dsh.client 自动发现）
+├── index.js              # Host 半：HTTP 路由 + 四步删除 + registry 清理
+├── client/client.js      # Client 半：工厂包、双入口、确认框
+├── icon.svg              # Plugin Manager 卡片图标
+├── test/                 # 66 条自动化测试（node --test，零依赖）
+└── docs/                 # 冲突审计、验收记录、DSH 源码契约
+```
+
+### 6.2 跑测试
+
+```bat
+npm test
+```
+
+预期 `66/66` 通过。
+
+### 6.3 改代码
+
+因为用 `link:` 安装，**改完代码后重启 DSH 即生效**，不需要重新安装。
+
+---
+
+## 7. 设计文档
+
+本插件的设计与决策记录在另一个仓库：
+
+```
+E:\ai编程需要的软件安装包\dsh-delete-session
+```
+
+里面有需求 spec、六张 ticket、七份 ADR（含关键决策与理由），以及实现期核实的 DSH 源码事实。想理解「为什么这么实现」看那里。
+
+---
+
+## 8. 许可证
+
+MIT License
+
+---
+
+> 注：本仓库仅包含插件实现代码。完整的设计文档、决策记录、测试用例、安装验收清单在另一个仓库中。如果你只是想安装使用该插件，只需克隆本仓库并按「安装方法」一节操作即可。
