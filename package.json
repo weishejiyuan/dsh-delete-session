@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-delete-session",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Permanently delete a DSH session from the sidebar row and the session context menu",
   "type": "module",
