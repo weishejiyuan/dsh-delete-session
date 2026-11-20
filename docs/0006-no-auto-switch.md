@@ -2,13 +2,12 @@
 
 日期：2026-11-19
 状态：已接受
-取代：Q12「自动切换到另一个会话」
 
 ## 背景
 
-Q12 曾决定「删除成功后 Client 半从 `sessions.list()` 选一个非 archived 会话调 `openSession()` 切换」，理由是避免 panel 留空白。
+早期设计曾考虑「删除成功后 Client 半从 `sessions.list()` 选一个非 archived 会话调 `openSession()` 切换」，理由是避免 panel 留空白。
 
-在第四轮 grilling 中，当被追问候选会话的过滤条件时，用户改判为「不自动切换」。
+在评估候选会话的过滤条件时发现这个方案站不住，遂改为「不自动切换」。
 
 ## 决策
 

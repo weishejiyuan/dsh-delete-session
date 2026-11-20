@@ -3,7 +3,7 @@
 日期：2026-11-19
 状态：已接受
 
-本文件记录 `@local/dsh-delete-session` 插件的所有命名与规范决策，来源于 grilling 决策 Q1–Q22 与 ADR-0001–0006。代码实现时直接套用，不重复造轮子。
+本文件记录 `@local/dsh-delete-session` 插件的所有命名与规范决策，与 ADR-0001–0006 配套。代码实现时直接套用，不重复造轮子。
 
 ## 包与 Loader 行
 
@@ -26,7 +26,7 @@
 | 成功响应 | `{ ok: true, code: 'OK' }` | JSON |
 | 失败响应 | `{ ok: false, code: 'SESSION_ACTIVE' \| 'SESSION_NOT_FOUND' \| 'DELETE_FAILED', message?: string }` | JSON |
 | 守卫失败响应 | `METHOD_NOT_ALLOWED`(405) / `REJECTED`(请求拒绝返回的 401·403) / `NOT_FOUND`(404) / `INVALID_SESSION_ID`(400) | 进业务逻辑之前的四道守卫，按此顺序判定 |
-| 活动检查 | 删除前 `ctx.waterfall('workspace/session-activity', {sessionId}, () => Promise.resolve([]))`，非空返回 `SESSION_ACTIVE` | Q19 决策，与官方 archiveSession 一致 |
+| 活动检查 | 删除前 `ctx.waterfall('workspace/session-activity', {sessionId}, () => Promise.resolve([]))`，非空返回 `SESSION_ACTIVE` | 与官方 archiveSession 一致 |
 | 鉴权 fence | `ctx.connection.requestRejection(req) === void 0` | 受信 Host/Origin + 已认证凭据，不接 `ctx.remoteAccess` |
 | 配置 | `Config = z.object({ sessionsRoot: z.string() })`（`@deepseek-ai/schemastery`） | 可选；不配时按 `$DSH_HOME` → `~/.dsh` 再拼 `sessions` |
 
@@ -40,8 +40,8 @@
 | 清 archive | `ctx.workspaceRegistry.unarchiveSession(sessionId)`（`Promise<void>`，必须 await） | 幂等，不校验会话存在 |
 | 清 pin | `ctx.workspaceRegistry.unpinSession(sessionId)`（同上） | 幂等，不校验会话存在 |
 | 执行顺序 | 活动检查 → stat 定位 → 围栏 → `rm -rf` 文件 → 清 archive → 清 pin | 活动检查非空则中止，不碰文件系统 |
-| 全或不全语义 | 所有步骤成功才返回 OK；任一失败返回 DELETE_FAILED | Q2 决策，不做部分成功，不回滚已删内容 |
-| 并发防护 | 不加锁，依赖活动检查闸门 + `rm force:true` 幂等性 + DSH 持久化层写锁 | Q3 决策 |
+| 全或不全语义 | 所有步骤成功才返回 OK；任一失败返回 DELETE_FAILED | 不做部分成功，不回滚已删内容 |
+| 并发防护 | 不加锁，依赖活动检查闸门 + `rm force:true` 幂等性 + DSH 持久化层写锁 | — |
 
 ## Client 半 package.json 字段（P1-1）
 
@@ -54,7 +54,7 @@
 | `peerDependencies["@deepseek-ai/dsh-client-ui-primitives"]` | `"^0.2.2-rc.2"` | `IconTrashOutlineRegular` 走 peerDependencies，不进 `dsh.client.inject`——这是 better-sidebar 的真实做法（`package.json:85`） |
 | `exports["./client"]` | `"./client/client.js"` | Client 半入口，`dsh-client-modules` 会自动发现并加载 |
 | `icon` | `"./icon.svg"` | Plugin Manager 卡片图标 |
-| `files` | 包含 `index.js`, `client/client.js`, `icon.svg`, `cordis.patch.yml` | 需随包发布的文件。**不含 `locale/`**——字符串内联在 client.js 里（Q23） |
+| `files` | 包含 `index.js`, `client/client.js`, `icon.svg`, `cordis.patch.yml` | 需随包发布的文件。**不含 `locale/`**——字符串内联在 client.js 里 |
 
 ## cordis.patch.yml 完整示例（P1-2）
 
@@ -65,11 +65,11 @@
       name: '@local/dsh-delete-session'
 ```
 
-## locale 字符串（内联，Q23）
+## locale 字符串（内联）
 
 **不建 `locale/*.json` 文件**。字符串直接内联在 `client/client.js` 里，单一真理来源，避免两份副本发散。
 
-**注册签名（Q16）**：一次调用传 dicts 对象——`ctx.locale.register('deleteSession', { zh: {...}, en: {...} })`。来源：`dsh-client-locale/src/client/index.ts:404` 的重载 `register(ns, localeOrDicts, dict?)`，官方内部就用这个形式（`:586-587`）。
+**注册签名**：一次调用传 dicts 对象——`ctx.locale.register('deleteSession', { zh: {...}, en: {...} })`。来源：`dsh-client-locale/src/client/index.ts:404` 的重载 `register(ns, localeOrDicts, dict?)`，官方内部就用这个形式（`:586-587`）。
 
 | key | zh | en | 用途 |
 |---|---|---|---|
@@ -139,7 +139,7 @@ window.__ModuleLoader__.load({
 | 右键菜单 target | `{ sessionId: string }` | `run` 回调里通过 `target.sessionId` 获取会话 id |
 | 确认框 | `PropsRuntime<'shell.overlay'> & PropsLocale<'deleteSession'> & PropsHooks<{ target, clear }>` | 照官方 `SessionArchiveConfirmProps` 形状（`slots.ts:510-515`）：`PropsRuntime` 提供 slot 运行时，`PropsLocale` 提供 `t()`，`PropsHooks` 注入自定义 hooks |
 
-**shell.overlay props 依据（Q17）**：官方所有 overlay 条目都走 `PropsRuntime<'shell.overlay'> & PropsLocale<NS> & Omit<Injected,'hooks'> & PropsHooks<Injected['hooks']>` 三段式（`slots.ts:503-519`）。本插件沿用同一形状，只是 `NS` 为 `deleteSession`、`Injected['hooks']` 为 `{ target, clear }`。
+**shell.overlay props 依据**：官方所有 overlay 条目都走 `PropsRuntime<'shell.overlay'> & PropsLocale<NS> & Omit<Injected,'hooks'> & PropsHooks<Injected['hooks']>` 三段式（`slots.ts:503-519`）。本插件沿用同一形状，只是 `NS` 为 `deleteSession`、`Injected['hooks']` 为 `{ target, clear }`。
 
 ## UI 入口
 
@@ -178,13 +178,13 @@ window.__ModuleLoader__.load({
 
 | 条件 | 判定 | 来源 |
 |---|---|---|
-| 运行中会话（Q24） | `useSessions(s => s.byId[sessionId]?.running === true)` | `SessionSummary.running`（client 侧 store，`dsh-api-session-controller/src/client/sessions/service.ts:27-65`），全局 props，无需 inject |
+| 运行中会话 | `useSessions(s => s.byId[sessionId]?.running === true)` | `SessionSummary.running`（client 侧 store，`dsh-api-session-controller/src/client/sessions/service.ts:27-65`），全局 props，无需 inject |
 
 「当前会话」（`retainedBy.mainView > 0`）**不再置灰**——撤销理由是只剩一个会话时入口会永久不可用，而官方 `archiveSession` 本身也不拦当前会话。见 ADR-0004 的「修订 2026-11-19」。
 
 客户端这道条件是「更早、更窄」的提示；权威判定在 Host 半的 `workspace/session-activity` waterfall（ADR-0001 第 0 步），覆盖子 agent / job / schedule。
 
-## 行可见性矩阵（Q20 / Q21 / Q24，2026-11-19 修订）
+## 行可见性矩阵（2026-11-19 修订）
 
 | 行的状态 | 行内按钮 | 右键菜单项 |
 |---|---|---|
@@ -205,7 +205,7 @@ window.__ModuleLoader__.load({
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 自动切换会话 | **不做** | Q18 决策，取代 Q12。删除成功后只关确认框 + 发 toast，panel 状态由 DSH 自行收敛（ADR-0006） |
+| 自动切换会话 | **不做** | 删除成功后只关确认框 + 发 toast，panel 状态由 DSH 自行收敛（ADR-0006） |
 | 撤销窗口 | 不提供 | 「永久删除」不可恢复，确认框已承担防误删职责（ADR-0005） |
 | 失败提示 | `ctx.contextMenus.notify()` toast，带原因 | 任一带 `code` 的失败（`SESSION_ACTIVE` / `SESSION_NOT_FOUND` / `DELETE_FAILED`）都展示对应文案 |
 
@@ -213,9 +213,9 @@ window.__ModuleLoader__.load({
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 安装命令 | `dsh plugin --profile desktop add link:E:\develop\dsh-plugins\dsh-delete-session` | 当前仅准备，不立即执行 |
+| 安装命令 | `dsh plugin --profile desktop add link:<插件目录>` | 用 `link:` 方式挂载本地目录 |
 | 生效 | 重启 DSH | 安装完成后重启 |
-| 插件目录 | `E:\develop\dsh-plugins\dsh-delete-session` | 代码落盘位置 |
+| 插件目录 | `<插件目录>` | 本仓库克隆到的位置 |
 
 ## 避免（反面模板）
 

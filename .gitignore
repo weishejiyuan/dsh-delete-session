@@ -1,4 +1,4 @@
-# 依赖（本项目不引入打包器，正常不会有；万一 Pi 加了测试依赖）
+# 依赖（本项目不引入打包器，正常不会有）
 node_modules/
 
 # 日志与临时文件
@@ -15,3 +15,11 @@ Thumbs.db
 # 本地实验产物（不属于插件交付）
 *.tmp
 scratch/
+
+# 维护者的本地备份脚本（与本机环境绑定，不进公开仓库）
+tools/sync-to-backup.ps1
+
+# 实现期内部文档（设计过程记录，不进公开仓库）
+docs/dsh-source-facts.md
+docs/conflict-audit-result.md
+docs/manual-acceptance.md

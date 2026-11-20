@@ -80,7 +80,7 @@ dsh plugin --profile desktop add link:<你的插件目录路径>
 例如本仓库克隆到本地后：
 
 ```bat
-dsh plugin --profile desktop add link:C:\path\to\dsh-delete-session
+dsh plugin --profile desktop add link:<插件目录>
 ```
 
 `link:` 方式安装：插件以**目录联接**形式挂进 profile，**改代码后重启 DSH 即生效**，不需要重新安装。
