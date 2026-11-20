@@ -214,21 +214,7 @@ function visibilityOf(row) {
 
 ---
 
-## 7. LICENSE（MIT）
-
-本插件采用 MIT License 开源。
-
-核心条款：
-
-- **允许**：商业使用、分发、修改、私有使用
-- **要求**：在软件及其所有副本中保留版权声明和许可证声明
-- **不提供**：任何明示或暗示的担保（包括对适销性和特定用途适用性的暗示担保）
-
-完整文本请参阅仓库根目录的 [LICENSE](LICENSE) 文件。
-
----
-
-## 8. 设计文档与决策记录
+## 7. 设计文档与决策记录
 
 设计文档、决策记录和实现细节请参阅：[docs/](docs/) 目录。
 
@@ -239,6 +225,20 @@ function visibilityOf(row) {
 - [0004-disable-current-session.md](docs/0004-disable-current-session.md)：当前会话判定决策
 - [0005-no-undo-window.md](docs/0005-no-undo-window.md)：不提供撤销窗口决策
 - [0006-no-auto-switch.md](docs/0006-no-auto-switch.md)：删除后不自动切换会话决策
+
+---
+
+## 8. LICENSE（MIT）
+
+本插件采用 MIT License 开源。
+
+核心条款：
+
+- **允许**：商业使用、分发、修改、私有使用
+- **要求**：在软件及其所有副本中保留版权声明和许可证声明
+- **不提供**：任何明示或暗示的担保（包括对适销性和特定用途适用性的暗示担保）
+
+完整文本请参阅仓库根目录的 [LICENSE](LICENSE) 文件。
 
 ---
 
