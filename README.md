@@ -1,4 +1,4 @@
-# @local/dsh-delete-session — DSH 桌面端会话永久删除插件
+# dsh-delete-session — DSH 桌面端会话永久删除插件
 
 为 DeepSeek Harness (DSH) 桌面端增加「会话永久删除」功能。
 
@@ -24,7 +24,7 @@ DSH 原生只支持「归档」会话（从侧栏隐藏，磁盘文件仍留在�
 ### 2.1 两个删除入口
 
 - **会话行内按钮**：会话行 hover 时，右侧按钮条出现垃圾桶图标（悬停 500ms 显示「永久删除」Tooltip）。
-- **右键菜单**：会话行右键，菜单底部（在「归档」项之后）出现「永久删除」，带上方分隔线和危险色图标。
+- **右键菜单**：会话行右键，菜单出现「永久删除」，带分隔线和危险色图标。
 
 两个入口共用同一套可见性规则和同一个确认框。
 
@@ -212,53 +212,3 @@ function visibilityOf(row) {
 - **只作用于会话级**：不处理 workspace 记录、不碰 workspace 自身的 `sessionIds` 数组（那是 workspace 级记录，由 DSH 自己维护）。
 - **安装绑定 desktop profile**：本插件按 `--profile desktop` 安装，换 profile 需重装。
 
----
-
-## 7. 开发
-
-### 6.1 目录结构
-
-```
-dsh-delete-session/
-├── package.json          # 包声明、dsh.client 字段、peerDependencies
-├── cordis.patch.yml      # 只插一行 Host 行（Client 半由 dsh.client 自动发现）
-├── index.js              # Host 半：HTTP 路由 + 四步删除 + registry 清理
-├── client/client.js      # Client 半：工厂包、双入口、确认框
-├── icon.svg              # Plugin Manager 卡片图标
-├── test/                 # 66 条自动化测试（node --test，零依赖）
-└── docs/                 # 冲突审计、验收记录、DSH 源码契约
-```
-
-### 6.2 跑测试
-
-```bat
-npm test
-```
-
-预期 `66/66` 通过。
-
-### 6.3 改代码
-
-因为用 `link:` 安装，**改完代码后重启 DSH 即生效**，不需要重新安装。
-
----
-
-## 7. 设计文档
-
-本插件的设计与决策记录在另一个仓库：
-
-```
-E:\ai编程需要的软件安装包\dsh-delete-session
-```
-
-里面有需求 spec、六张 ticket、七份 ADR（含关键决策与理由），以及实现期核实的 DSH 源码事实。想理解「为什么这么实现」看那里。
-
----
-
-## 8. 许可证
-
-MIT License
-
----
-
-> 注：本仓库仅包含插件实现代码。完整的设计文档、决策记录、测试用例、安装验收清单在另一个仓库中。如果你只是想安装使用该插件，只需克隆本仓库并按「安装方法」一节操作即可。
